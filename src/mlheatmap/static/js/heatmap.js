@@ -1,5 +1,6 @@
 /* Heatmap Panel Logic - SOTA-quality with dendrograms & group color bar */
 const Heatmap = {
+    _isShapMode: false,
     GROUP_COLORS: ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
                    '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
 
@@ -14,7 +15,13 @@ const Heatmap = {
         const label = document.getElementById('topn-value');
         slider.addEventListener('input', () => label.textContent = slider.value);
 
-        document.getElementById('btn-render-heatmap').addEventListener('click', () => this.render());
+        document.getElementById('btn-render-heatmap').addEventListener('click', () => {
+            if (this._isShapMode && App.state.biomarkerResults) {
+                this.renderShapHeatmap();
+            } else {
+                this.render();
+            }
+        });
         document.getElementById('btn-to-biomarker').addEventListener('click', () => App.goToPanel('export'));
 
         // Dynamic heatmap size controls
@@ -57,6 +64,7 @@ const Heatmap = {
 
     async render() {
         if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
+        this._isShapMode = false;
 
         App.showLoading('Computing heatmap...');
         try {
@@ -357,6 +365,7 @@ const Heatmap = {
 
         const bioResults = App.state.biomarkerResults;
         if (!bioResults) return App.showToast('Run biomarker analysis first', 'error');
+        this._isShapMode = true;
 
         // Use the number of top genes from biomarker results (capped at 100)
         const nTopGenes = Math.min(bioResults.top_genes ? bioResults.top_genes.length : 20, 100);
