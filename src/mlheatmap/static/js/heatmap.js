@@ -1,6 +1,7 @@
 /* Heatmap Panel Logic - SOTA-quality with dendrograms & group color bar */
 const Heatmap = {
     _isShapMode: false,
+    _isDegMode: false,
     GROUP_COLORS: ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
                    '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
 
@@ -16,7 +17,9 @@ const Heatmap = {
         slider.addEventListener('input', () => label.textContent = slider.value);
 
         document.getElementById('btn-render-heatmap').addEventListener('click', () => {
-            if (this._isShapMode && App.state.biomarkerResults) {
+            if (this._isDegMode && App.state.degResults) {
+                this.renderDegHeatmap();
+            } else if (this._isShapMode && App.state.biomarkerResults) {
                 this.renderShapHeatmap();
             } else {
                 this.render();
@@ -408,6 +411,7 @@ const Heatmap = {
             if (subtitle) subtitle.textContent = `Top ${nTopGenes} genes by ML feature importance (SHAP). Unlike DEG heatmaps, group separation is not guaranteed.`;
 
             this.plotShapHeatmap(data);
+            App.markStepCompleted('heatmap');
         } catch (err) {
             App.showToast('SHAP heatmap failed: ' + err.message, 'error');
         } finally {
@@ -707,6 +711,238 @@ const Heatmap = {
             displayModeBar: true,
             modeBarButtonsToRemove: ['lasso2d', 'select2d'],
             displaylogo: false,
+            toImageButtonOptions: { format: 'png', height: 1600, width: 2000, scale: 2 },
+        }).then(() => this._resizePlot());
+    },
+
+    // =============================================
+    // DEG HEATMAP MODE
+    // =============================================
+    async renderDegHeatmap() {
+        if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
+        if (!App.state.degResults) return App.showToast('Run DEG analysis first', 'error');
+
+        this._isShapMode = false;
+        this._isDegMode = true;
+
+        const nTopGenes = Math.min(parseInt(document.getElementById('topn-slider').value) || 30, 200);
+
+        App.showLoading('Computing DEG heatmap...');
+        try {
+            const clusterRowsEl = document.getElementById('cluster-rows');
+            const clusterColsEl = document.getElementById('cluster-cols');
+            const data = await API.getDegHeatmap(App.state.sessionId, {
+                topN: nTopGenes,
+                distance: document.getElementById('distance-select').value,
+                linkage: document.getElementById('linkage-select').value,
+                colorScale: document.getElementById('colorscale-select').value,
+                clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
+                clusterCols: clusterColsEl ? clusterColsEl.checked : true,
+            });
+
+            const header = document.querySelector('#panel-heatmap .panel-header h1');
+            const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
+            if (header) header.textContent = 'DEG Heatmap';
+            if (subtitle) subtitle.textContent = `Top ${nTopGenes} DEGs by adjusted p-value (${data.method || 'Wilcoxon'} test)`;
+
+            this.plotDegHeatmap(data);
+            App.markStepCompleted('heatmap');
+        } catch (err) {
+            App.showToast('DEG heatmap failed: ' + err.message, 'error');
+        } finally {
+            App.hideLoading();
+        }
+    },
+
+    plotDegHeatmap(data) {
+        const { z, x, y, groups, color_scale, row_dendrogram, col_dendrogram, log2fc_values, neglog10p_values } = data;
+
+        const nGenes = y.length;
+        const nSamples = x.length;
+
+        const groupNames = Object.keys(groups || {});
+        const hasGroups = groupNames.length >= 2;
+        const sampleGroupMap = {};
+        if (hasGroups) {
+            groupNames.forEach((name, i) => {
+                (groups[name] || []).forEach(sample => { sampleGroupMap[sample] = name; });
+            });
+        }
+
+        const hasRowDendro = row_dendrogram && row_dendrogram.icoord && row_dendrogram.icoord.length > 0;
+        const hasColDendro = col_dendrogram && col_dendrogram.icoord && col_dendrogram.icoord.length > 0;
+
+        const traces = [];
+
+        // Layout — same structure as SHAP heatmap, but with log2FC bar on right
+        const rowDendroWidth = hasRowDendro ? 0.07 : 0;
+        const geneNameGap = hasRowDendro ? 0.10 : 0;
+        const fcBarWidth = 0.14;
+        const colDendroHeight = hasColDendro ? 0.10 : 0;
+        const groupBarHeight = hasGroups ? 0.03 : 0;
+        const legendSpace = hasGroups ? 0.04 : 0;
+        const gapBetween = 0.02;
+
+        const xRowDendro = [0, rowDendroWidth > 0 ? rowDendroWidth - 0.01 : 0];
+        const heatmapLeft = rowDendroWidth + geneNameGap;
+        const xHeatmap = [heatmapLeft, 1 - fcBarWidth - gapBetween];
+        const xFcBar = [1 - fcBarWidth + 0.01, 1];
+        const yHeatmap = [0, 1 - colDendroHeight - groupBarHeight - legendSpace];
+        const yGroupBar = [1 - colDendroHeight - groupBarHeight - legendSpace + 0.005, 1 - colDendroHeight - legendSpace - 0.005];
+        const yColDendro = [1 - colDendroHeight - legendSpace, 1 - legendSpace];
+
+        const xNums = Array.from({length: nSamples}, (_, i) => i);
+        const yNums = Array.from({length: nGenes}, (_, i) => i);
+
+        // 1. MAIN HEATMAP
+        const hoverTexts = z.map((row, gi) =>
+            row.map((val, si) => {
+                const group = sampleGroupMap[x[si]] || '';
+                const fc = log2fc_values ? `\nlog2FC: ${log2fc_values[gi].toFixed(3)}` : '';
+                return `<b>${y[gi]}</b><br>${x[si]}${group ? ` (${group})` : ''}<br>Z-score: ${val.toFixed(2)}${fc}`;
+            })
+        );
+
+        traces.push({
+            z: z, x: xNums, y: yNums,
+            type: 'heatmap',
+            colorscale: this._getColorScale(color_scale),
+            zmid: 0, zmin: -3, zmax: 3,
+            hovertext: hoverTexts,
+            hovertemplate: '%{hovertext}<extra></extra>',
+            xaxis: 'x', yaxis: 'y',
+            showscale: true,
+            colorbar: {
+                title: { text: 'Z-score', font: { color: '#e2e8f0', size: 10 } },
+                tickfont: { color: '#94a3b8', size: 9 },
+                thickness: 12, len: 0.3,
+                y: 0.15, yanchor: 'middle',
+                x: 1.02, xanchor: 'left',
+                orientation: 'v',
+                outlinewidth: 0,
+                tickvals: [-3, 0, 3],
+            },
+        });
+
+        // 2. COLUMN DENDROGRAM
+        if (hasColDendro) {
+            const { icoord, dcoord } = col_dendrogram;
+            for (let i = 0; i < icoord.length; i++) {
+                traces.push({
+                    x: icoord[i].map(v => (v - 5) / 10), y: dcoord[i],
+                    mode: 'lines', line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
+                    xaxis: 'x', yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
+                });
+            }
+        }
+
+        // 3. ROW DENDROGRAM
+        if (hasRowDendro) {
+            const { icoord, dcoord } = row_dendrogram;
+            for (let i = 0; i < icoord.length; i++) {
+                traces.push({
+                    x: dcoord[i].map(v => -v), y: icoord[i].map(v => (v - 5) / 10),
+                    mode: 'lines', line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
+                    xaxis: 'x3', yaxis: 'y6', showlegend: false, hoverinfo: 'skip',
+                });
+            }
+        }
+
+        // 4. GROUP COLOR BAR
+        if (hasGroups) {
+            const nGroups = groupNames.length;
+            const groupZ = [xNums.map(si => {
+                const gi = groupNames.indexOf(sampleGroupMap[x[si]]);
+                return gi >= 0 ? gi + 0.5 : -0.5;
+            })];
+            const groupColorscale = [];
+            for (let i = 0; i < nGroups; i++) {
+                groupColorscale.push([i / nGroups, this.GROUP_COLORS[i % this.GROUP_COLORS.length]]);
+                groupColorscale.push([(i + 1) / nGroups, this.GROUP_COLORS[i % this.GROUP_COLORS.length]]);
+            }
+            traces.push({
+                z: groupZ, x: xNums, y: [0], type: 'heatmap',
+                colorscale: groupColorscale, zmin: 0, zmax: nGroups, showscale: false,
+                xaxis: 'x', yaxis: 'y4',
+                hovertemplate: '<b>%{customdata}</b><extra></extra>',
+                customdata: [x.map(s => sampleGroupMap[s] || 'Unassigned')],
+            });
+        }
+
+        // 5. LOG2FC BAR (right side)
+        if (log2fc_values && log2fc_values.length > 0) {
+            const maxAbsFc = Math.max(...log2fc_values.map(Math.abs), 0.1);
+            traces.push({
+                x: log2fc_values, y: yNums,
+                type: 'bar', orientation: 'h',
+                xaxis: 'x5', yaxis: 'y',
+                marker: {
+                    color: log2fc_values.map(v => v > 0 ? '#ef4444' : '#3b82f6'),
+                },
+                hovertemplate: '<b>%{customdata}</b><br>log2FC: %{x:.3f}<extra></extra>',
+                customdata: y,
+                showlegend: false,
+            });
+        }
+
+        // LAYOUT
+        const heightSlider = document.getElementById('heatmap-height-slider');
+        const widthSlider = document.getElementById('heatmap-width-slider');
+        const sliderHeight = heightSlider ? parseInt(heightSlider.value) : 0;
+        const sliderWidth = widthSlider ? parseInt(widthSlider.value) : 0;
+        const totalHeight = sliderHeight > 0 ? sliderHeight : Math.max(550, Math.min(2400, nGenes * 18 + 280));
+        const sampleFontSize = Math.max(6, Math.min(11, 500 / nSamples));
+        const plotAreaHeight = totalHeight * (yHeatmap[1] - yHeatmap[0]) * 0.85;
+        const pxPerGene = plotAreaHeight / nGenes;
+        const geneFontSize = Math.max(7, Math.min(12, pxPerGene * 0.85));
+        const geneTickVals = yNums;
+        const geneTickText = y;
+        const maxGeneLen = geneTickText.reduce((max, g) => Math.max(max, g.length), 0);
+        const leftMargin = Math.max(80, Math.min(160, maxGeneLen * geneFontSize * 0.65 + 10));
+
+        const layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
+            height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
+            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
+
+            xaxis: { domain: xHeatmap, tickvals: xNums, ticktext: x, tickangle: -45,
+                tickfont: { size: sampleFontSize, color: '#94a3b8' }, side: 'bottom',
+                showgrid: false, zeroline: false, range: [-0.5, nSamples - 0.5] },
+            yaxis: { domain: yHeatmap,
+                anchor: hasRowDendro ? 'free' : undefined, position: hasRowDendro ? heatmapLeft : undefined,
+                tickvals: geneTickVals, ticktext: geneTickText,
+                tickfont: { size: geneFontSize, color: '#94a3b8' },
+                autorange: 'reversed', showgrid: false, zeroline: false, range: [-0.5, nGenes - 0.5] },
+            yaxis2: { domain: yColDendro, showticklabels: false, showgrid: false, zeroline: false, showline: false },
+            xaxis3: { domain: xRowDendro, showticklabels: false, showgrid: false, zeroline: false, showline: false, autorange: true },
+            yaxis4: { domain: yGroupBar, showticklabels: false, showgrid: false, zeroline: false, showline: false, fixedrange: true },
+            xaxis5: { domain: xFcBar, showgrid: false, zeroline: true, zerolinecolor: 'rgba(255,255,255,0.2)',
+                showticklabels: true, tickfont: { size: 8, color: '#64748b' },
+                title: { text: 'log2FC', font: { size: 9, color: '#94a3b8' } }, side: 'bottom' },
+            yaxis6: { domain: yHeatmap, anchor: 'x3', range: [-0.5, nGenes - 0.5],
+                autorange: 'reversed', showticklabels: false, showgrid: false, zeroline: false, showline: false },
+
+            annotations: [],
+        };
+
+        if (hasGroups) {
+            const parts = groupNames.map((name, i) => {
+                const c = this.GROUP_COLORS[i % this.GROUP_COLORS.length];
+                return `<span style="color:${c}">\u25a0</span> ${this._escapeHtml(name)}`;
+            });
+            layout.annotations.push({ text: parts.join('&nbsp;&nbsp;&nbsp;'),
+                xref: 'paper', yref: 'paper', x: (xHeatmap[0] + xHeatmap[1]) / 2, y: 1 - legendSpace / 2,
+                showarrow: false, font: { size: 11, color: '#cbd5e1' }, xanchor: 'center', yanchor: 'middle' });
+        }
+
+        layout.annotations.push({ text: `DEG Top ${nGenes} genes`,
+            xref: 'paper', yref: 'paper', x: 0, y: -0.01,
+            showarrow: false, font: { size: 10, color: '#64748b' }, xanchor: 'left', yanchor: 'top' });
+
+        Plotly.newPlot('heatmap-plot', traces, layout, {
+            responsive: true, displayModeBar: true,
+            modeBarButtonsToRemove: ['lasso2d', 'select2d'], displaylogo: false,
             toImageButtonOptions: { format: 'png', height: 1600, width: 2000, scale: 2 },
         }).then(() => this._resizePlot());
     },

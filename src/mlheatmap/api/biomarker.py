@@ -87,6 +87,67 @@ async def biomarker_stream(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@router.get("/biomarker/deg")
+async def deg_analysis(
+    request: Request,
+    session_id: str = Query(...),
+    method: str = Query("wilcoxon"),
+    log2fc_threshold: float = Query(1.0, ge=0),
+    pvalue_threshold: float = Query(0.05, ge=0, le=1),
+):
+    """Run DEG analysis between groups."""
+    session = request.app.state.sessions.get(session_id)
+    if not session or session.normalized is None:
+        return JSONResponse({"error": "No normalized data"}, status_code=404)
+
+    if len(session.groups) != 2:
+        return JSONResponse(
+            {"error": "DEG requires exactly 2 groups"}, status_code=400
+        )
+
+    from mlheatmap.core.deg import compute_deg
+
+    # Build sample indices from groups
+    sample_groups = {}
+    for group, samples in session.groups.items():
+        for s in samples:
+            if s in session.sample_names and s not in session.excluded_samples:
+                sample_groups.setdefault(group, []).append(
+                    session.sample_names.index(s)
+                )
+
+    result = compute_deg(
+        expression=session.normalized,
+        gene_names=session.gene_names,
+        sample_groups=sample_groups,
+        method=method,
+        log2fc_threshold=log2fc_threshold,
+        pvalue_threshold=pvalue_threshold,
+    )
+
+    # Store for heatmap use
+    session.deg_results = result
+
+    # Limit response size: send top 500 for volcano plot + all significant
+    top_results = result["results"][:500]
+    sig_genes = [r for r in result["results"] if r["direction"] != "ns"]
+    # Merge (avoid duplicates)
+    seen = {r["gene"] for r in top_results}
+    for r in sig_genes:
+        if r["gene"] not in seen:
+            top_results.append(r)
+
+    response = {
+        "results": top_results,
+        "summary": result["summary"],
+        "group_names": result["group_names"],
+        "thresholds": result["thresholds"],
+        "method": result["method"],
+    }
+
+    return JSONResponse(response, headers={"Content-Type": "application/json"})
+
+
 def _json_safe(obj):
     """JSON serializer for numpy types."""
     import numpy as np

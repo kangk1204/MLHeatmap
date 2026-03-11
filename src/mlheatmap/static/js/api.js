@@ -101,6 +101,33 @@ const API = {
         return res.json();
     },
 
+    async runDeg(sessionId, opts = {}) {
+        const params = new URLSearchParams({
+            session_id: sessionId,
+            method: opts.method || 'wilcoxon',
+            log2fc_threshold: opts.log2fcThreshold || 1.0,
+            pvalue_threshold: opts.pvalueThreshold || 0.05,
+        });
+        const res = await fetch(`${this.baseUrl}/biomarker/deg?${params}`);
+        if (!res.ok) throw new Error((await res.json()).error || 'DEG analysis failed');
+        return res.json();
+    },
+
+    async getDegHeatmap(sessionId, opts = {}) {
+        const params = new URLSearchParams({
+            session_id: sessionId,
+            top_n: opts.topN || 30,
+            distance: opts.distance || 'correlation',
+            linkage: opts.linkage || 'average',
+            color_scale: opts.colorScale || 'RdBu_r',
+            cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
+            cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
+        });
+        const res = await fetch(`${this.baseUrl}/heatmap/deg?${params}`);
+        if (!res.ok) throw new Error((await res.json()).error || 'DEG heatmap failed');
+        return res.json();
+    },
+
     exportUrl(sessionId, type, dpi = 300) {
         const params = new URLSearchParams({ session_id: sessionId, type, dpi });
         return `${this.baseUrl}/export?${params}`;

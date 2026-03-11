@@ -1,10 +1,24 @@
 /* Biomarker Panel Logic */
 const Biomarker = {
+    _activeTab: 'ml',
+
     init() {
         document.getElementById('btn-run-biomarker').addEventListener('click', () => this.run());
         document.getElementById('btn-to-export').addEventListener('click', () => {
             App.goToPanel('heatmap');
             Heatmap.renderShapHeatmap();
+        });
+
+        // DEG buttons
+        document.getElementById('btn-run-deg').addEventListener('click', () => this.runDeg());
+        document.getElementById('btn-deg-to-heatmap').addEventListener('click', () => {
+            App.goToPanel('heatmap');
+            Heatmap.renderDegHeatmap();
+        });
+
+        // Tab switching
+        document.querySelectorAll('.bio-tab').forEach(tab => {
+            tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
         });
 
         // Model-specific parameter visibility
@@ -13,6 +27,16 @@ const Biomarker = {
             modelSelect.addEventListener('change', () => this._updateModelParams());
             this._updateModelParams();
         }
+    },
+
+    _switchTab(tab) {
+        this._activeTab = tab;
+        document.querySelectorAll('.bio-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        document.getElementById('ml-controls').classList.toggle('hidden', tab !== 'ml');
+        document.getElementById('deg-controls').classList.toggle('hidden', tab !== 'deg');
+        // Show/hide results
+        document.getElementById('biomarker-results').classList.toggle('hidden', tab !== 'ml' || !App.state.biomarkerResults);
+        document.getElementById('deg-results').classList.toggle('hidden', tab !== 'deg' || !App.state.degResults);
     },
 
     _updateModelParams() {
@@ -397,6 +421,162 @@ const Biomarker = {
             tr.appendChild(tdSymbol);
             tr.appendChild(tdImp);
             tr.appendChild(tdShap);
+            tbody.appendChild(tr);
+        });
+    },
+
+    // =============================================
+    // DEG Analysis
+    // =============================================
+    async runDeg() {
+        if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
+
+        const groups = App.state.groups || {};
+        if (Object.keys(groups).length !== 2) {
+            App.showToast('DEG requires exactly 2 groups', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btn-run-deg');
+        btn.disabled = true;
+        App.showLoading('Running DEG analysis...');
+
+        try {
+            const data = await API.runDeg(App.state.sessionId, {
+                method: document.getElementById('deg-method-select').value,
+                log2fcThreshold: parseFloat(document.getElementById('deg-fc-threshold').value),
+                pvalueThreshold: parseFloat(document.getElementById('deg-pval-threshold').value),
+            });
+
+            App.state.degResults = data;
+            this.showDegResults(data);
+            App.markStepCompleted('biomarker');
+            App.showToast(`DEG complete: ${data.summary.n_up} up, ${data.summary.n_down} down`, 'success');
+        } catch (err) {
+            App.showToast(err.message, 'error');
+        } finally {
+            btn.disabled = false;
+            App.hideLoading();
+        }
+    },
+
+    showDegResults(data) {
+        document.getElementById('deg-results').classList.remove('hidden');
+        document.getElementById('biomarker-results').classList.add('hidden');
+
+        // Summary cards
+        const summaryEl = document.getElementById('deg-summary');
+        summaryEl.innerHTML = `
+            <div class="deg-stat up"><span class="count">${data.summary.n_up}</span><span class="label">Up-regulated</span></div>
+            <div class="deg-stat down"><span class="count">${data.summary.n_down}</span><span class="label">Down-regulated</span></div>
+            <div class="deg-stat ns"><span class="count">${data.summary.n_not_significant}</span><span class="label">Not Significant</span></div>
+        `;
+
+        // Volcano plot
+        this.plotVolcano(data);
+
+        // DEG table
+        this.populateDegTable(data.results);
+    },
+
+    plotVolcano(data) {
+        const results = data.results;
+        const fcThresh = data.thresholds.log2fc;
+        const pThresh = data.thresholds.pvalue;
+        const negLog10PThresh = -Math.log10(pThresh);
+
+        // Separate by direction
+        const up = results.filter(r => r.direction === 'up');
+        const down = results.filter(r => r.direction === 'down');
+        const ns = results.filter(r => r.direction === 'ns');
+
+        const makeTrace = (subset, name, color) => ({
+            x: subset.map(r => r.log2fc),
+            y: subset.map(r => r.neg_log10_p),
+            text: subset.map(r => r.gene),
+            mode: 'markers',
+            name: `${name} (${subset.length})`,
+            marker: { color, size: 5, opacity: 0.7 },
+            hovertemplate: '<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(FDR): %{y:.2f}<extra></extra>',
+        });
+
+        const traces = [
+            makeTrace(ns, 'NS', '#475569'),
+            makeTrace(up, 'Up', '#ef4444'),
+            makeTrace(down, 'Down', '#3b82f6'),
+        ];
+
+        // Top gene labels
+        const sigGenes = [...up, ...down].sort((a, b) => a.adj_pvalue - b.adj_pvalue).slice(0, 10);
+        if (sigGenes.length > 0) {
+            traces.push({
+                x: sigGenes.map(r => r.log2fc),
+                y: sigGenes.map(r => r.neg_log10_p),
+                text: sigGenes.map(r => r.gene),
+                mode: 'text',
+                textposition: 'top center',
+                textfont: { size: 9, color: '#e2e8f0' },
+                showlegend: false,
+                hoverinfo: 'skip',
+            });
+        }
+
+        // Compute x range
+        const allFc = results.map(r => r.log2fc);
+        const maxFc = Math.max(Math.abs(Math.min(...allFc)), Math.abs(Math.max(...allFc)), fcThresh + 1);
+
+        const layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 11 },
+            xaxis: {
+                title: { text: 'log2 Fold Change', font: { size: 12 } },
+                gridcolor: 'rgba(255,255,255,0.04)',
+                zeroline: false,
+                range: [-maxFc * 1.1, maxFc * 1.1],
+            },
+            yaxis: {
+                title: { text: '-log10(FDR)', font: { size: 12 } },
+                gridcolor: 'rgba(255,255,255,0.04)',
+                zeroline: false,
+            },
+            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.3)', font: { size: 10 } },
+            margin: { l: 60, r: 20, t: 10, b: 60 },
+            shapes: [
+                // Vertical FC thresholds
+                { type: 'line', x0: fcThresh, x1: fcThresh, y0: 0, y1: 1, yref: 'paper', line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
+                { type: 'line', x0: -fcThresh, x1: -fcThresh, y0: 0, y1: 1, yref: 'paper', line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
+                // Horizontal p-value threshold
+                { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: negLog10PThresh, y1: negLog10PThresh, line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
+            ],
+        };
+
+        Plotly.newPlot('volcano-plot', traces, layout, {
+            responsive: true, displayModeBar: false,
+        });
+    },
+
+    populateDegTable(results) {
+        const tbody = document.querySelector('#deg-table tbody');
+        tbody.innerHTML = '';
+
+        // Show top 50 significant genes
+        const sig = results.filter(r => r.direction !== 'ns').slice(0, 50);
+        if (sig.length === 0) {
+            // Fallback: show top 50 by p-value
+            sig.push(...results.slice(0, 50));
+        }
+
+        sig.forEach((gene, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="font-weight:600;color:var(--text-accent)">${i + 1}</td>
+                <td style="font-weight:600">${gene.gene}</td>
+                <td>${gene.log2fc.toFixed(3)}</td>
+                <td>${gene.pvalue.toExponential(2)}</td>
+                <td>${gene.adj_pvalue.toExponential(2)}</td>
+                <td class="dir-${gene.direction}">${gene.direction === 'up' ? '▲ Up' : gene.direction === 'down' ? '▼ Down' : '— NS'}</td>
+            `;
             tbody.appendChild(tr);
         });
     },
