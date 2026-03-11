@@ -16,6 +16,7 @@ async def biomarker_stream(
     n_estimators: int = Query(500, ge=50, le=2000),
     cv_folds: int = Query(5, ge=2, le=10),
     model: str = Query("rf"),
+    panel_method: str = Query("forward"),
 ):
     """Run biomarker analysis with SSE progress streaming."""
     session = request.app.state.sessions.get(session_id)
@@ -56,6 +57,7 @@ async def biomarker_stream(
                 n_estimators=n_estimators,
                 cv_folds=cv_folds,
                 model=model,
+                panel_method=panel_method,
                 progress_callback=progress_callback,
             ),
         )

@@ -170,6 +170,7 @@ def run_biomarker_analysis(
     n_estimators: int = 500,
     cv_folds: int = 5,
     model: str = "rf",
+    panel_method: str = "forward",
     progress_callback=None,
 ) -> dict:
     """Full biomarker discovery pipeline with proper nested CV.
@@ -323,13 +324,26 @@ def run_biomarker_analysis(
     roc_data = _compute_cv_roc(X_top, y, le.classes_, model, n_estimators,
                                outer_cv, needs_scaling)
 
-    # 7. Optimal gene combination (with inner CV)
-    _progress("optimal", 88, "Finding optimal gene combination")
-    optimal_combo = _find_optimal_combination(
-        X_filt, y, top_idx, filt_names, le.classes_,
-        model, n_estimators, needs_scaling,
-        n_splits=n_splits, max_genes=min(n_top_genes, 15),
+    # 7. Optimal gene combination (dispatched by panel_method)
+    max_panel = min(n_top_genes, 15)
+    combo_args = dict(
+        X_filt=X_filt, y=y, top_idx=top_idx, filt_names=filt_names,
+        classes=le.classes_, model=model, n_estimators=n_estimators,
+        needs_scaling=needs_scaling, n_splits=n_splits, max_genes=max_panel,
     )
+
+    if panel_method == "lasso":
+        _progress("optimal", 85, "Running LASSO panel selection")
+        optimal_combo = _lasso_panel(**combo_args, progress_fn=_progress)
+    elif panel_method == "stability":
+        _progress("optimal", 85, "Running Stability Selection")
+        optimal_combo = _stability_panel(**combo_args, progress_fn=_progress)
+    elif panel_method == "mrmr":
+        _progress("optimal", 85, "Running mRMR panel selection")
+        optimal_combo = _mrmr_panel(**combo_args, progress_fn=_progress)
+    else:
+        _progress("optimal", 88, "Finding optimal gene combination")
+        optimal_combo = _find_optimal_combination(**combo_args)
 
     _progress("complete", 100, "Analysis complete")
 
@@ -361,6 +375,7 @@ def run_biomarker_analysis(
         "n_samples": len(y),
         "optimal_combo": optimal_combo,
         "model": model_display,
+        "panel_method": panel_method,
     }
 
 
@@ -429,6 +444,7 @@ def _find_optimal_combination(
         "best_auc": round(best_auc, 4),
         "n_genes": len(best_set),
         "auc_curve": auc_curve,
+        "method": "forward",
     }
 
 
@@ -456,6 +472,289 @@ def _quick_cv_auc(X, y, y_bin, n_classes, model, n_estimators, needs_scaling, cv
                 aucs.append(auc(fpr, tpr))
 
     return float(np.mean(aucs)) if aucs else 0.5
+
+
+def _build_auc_curve(X_filt, y, ordered_idx, filt_names, classes,
+                     model, n_estimators, needs_scaling, n_splits):
+    """Build step-by-step AUC curve for an ordered list of gene indices."""
+    n_classes = len(classes)
+    min_class = int(min(np.bincount(y)))
+    inner_splits = max(2, min(n_splits, min_class))
+    inner_cv = StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=123)
+    y_bin = label_binarize(y, classes=range(n_classes))
+    if n_classes == 2:
+        y_bin = np.column_stack([1 - y_bin.ravel(), y_bin.ravel()])
+
+    auc_curve = []
+    best_auc = 0.0
+    best_n = 0
+    for k in range(1, len(ordered_idx) + 1):
+        X_sub = X_filt[:, ordered_idx[:k]]
+        try:
+            mean_auc = _quick_cv_auc(X_sub, y, y_bin, n_classes,
+                                     model, n_estimators, needs_scaling, inner_cv)
+        except Exception:
+            mean_auc = 0.5
+        auc_curve.append({
+            "n_genes": k,
+            "auc": round(mean_auc, 4),
+            "gene_added": filt_names[ordered_idx[k - 1]],
+        })
+        if mean_auc > best_auc:
+            best_auc = mean_auc
+            best_n = k
+    best_genes = [filt_names[ordered_idx[i]] for i in range(best_n)]
+    return auc_curve, best_genes, round(best_auc, 4), best_n
+
+
+# ── LASSO panel selection ──
+
+def _lasso_panel(X_filt, y, top_idx, filt_names, classes,
+                 model, n_estimators, needs_scaling,
+                 n_splits=5, max_genes=15, progress_fn=None):
+    """Select genes via L1-penalized logistic regression."""
+    from sklearn.linear_model import LogisticRegression
+
+    candidate_idx = list(top_idx[:max_genes])
+    X_cand = X_filt[:, candidate_idx]
+
+    # Scale for LASSO
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_cand)
+
+    n_classes = len(classes)
+    multi = "ovr" if n_classes > 2 else "auto"
+
+    # Scan C values to find one that selects a reasonable number of genes
+    best_c, best_sel = None, []
+    for C_val in np.logspace(-3, 1, 20):
+        try:
+            lr = LogisticRegression(
+                penalty="l1", C=C_val, solver="saga", max_iter=5000,
+                multi_class=multi, class_weight="balanced", random_state=42,
+            )
+            lr.fit(X_scaled, y)
+            coef = np.abs(lr.coef_)
+            if coef.ndim > 1:
+                coef = np.mean(coef, axis=0)
+            else:
+                coef = coef.ravel()
+            nonzero = np.where(coef > 1e-10)[0]
+            if 1 <= len(nonzero) <= max_genes:
+                if len(nonzero) > len(best_sel):
+                    best_c = C_val
+                    best_sel = nonzero.tolist()
+                    best_coef = coef
+        except Exception:
+            continue
+
+    if progress_fn:
+        progress_fn("optimal", 90, f"LASSO selected {len(best_sel)} genes")
+
+    if not best_sel:
+        # Fallback: use all candidates ranked by a moderate LASSO
+        try:
+            lr = LogisticRegression(
+                penalty="l1", C=1.0, solver="saga", max_iter=5000,
+                multi_class=multi, class_weight="balanced", random_state=42,
+            )
+            lr.fit(X_scaled, y)
+            coef = np.abs(lr.coef_)
+            if coef.ndim > 1:
+                coef = np.mean(coef, axis=0)
+            else:
+                coef = coef.ravel()
+            ranked = np.argsort(coef)[::-1][:max_genes]
+            ordered_idx = [candidate_idx[i] for i in ranked]
+        except Exception:
+            ordered_idx = candidate_idx[:max_genes]
+    else:
+        # Rank selected genes by |coefficient|
+        ranked = sorted(best_sel, key=lambda i: best_coef[i], reverse=True)
+        ordered_idx = [candidate_idx[i] for i in ranked]
+
+    # Build AUC curve
+    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
+        X_filt, y, ordered_idx, filt_names, classes,
+        model, n_estimators, needs_scaling, n_splits,
+    )
+
+    if progress_fn:
+        progress_fn("optimal", 97, "LASSO panel complete")
+
+    return {
+        "best_genes": best_genes,
+        "best_auc": best_auc,
+        "n_genes": best_n,
+        "auc_curve": auc_curve,
+        "method": "lasso",
+    }
+
+
+# ── Stability Selection ──
+
+def _stability_panel(X_filt, y, top_idx, filt_names, classes,
+                     model, n_estimators, needs_scaling,
+                     n_splits=5, max_genes=15, progress_fn=None):
+    """Bootstrap LASSO for stable gene selection."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedShuffleSplit
+
+    candidate_idx = list(top_idx[:max_genes])
+    X_cand = X_filt[:, candidate_idx]
+    n_cand = len(candidate_idx)
+    n_classes = len(classes)
+    multi = "ovr" if n_classes > 2 else "auto"
+
+    n_bootstrap = 100
+    freq = np.zeros(n_cand)
+
+    splitter = StratifiedShuffleSplit(n_splits=n_bootstrap, test_size=0.2, random_state=42)
+
+    for i, (train_idx, _) in enumerate(splitter.split(X_cand, y)):
+        if progress_fn and i % 20 == 0:
+            pct = 85 + int(i / n_bootstrap * 10)
+            progress_fn("optimal", pct, f"Stability bootstrap {i}/{n_bootstrap}")
+
+        X_sub = X_cand[train_idx]
+        y_sub = y[train_idx]
+
+        scaler = StandardScaler()
+        X_sub_s = scaler.fit_transform(X_sub)
+
+        try:
+            lr = LogisticRegression(
+                penalty="l1", C=0.5, solver="saga", max_iter=2000,
+                multi_class=multi, class_weight="balanced", random_state=i,
+            )
+            lr.fit(X_sub_s, y_sub)
+            coef = np.abs(lr.coef_)
+            if coef.ndim > 1:
+                coef = np.mean(coef, axis=0)
+            else:
+                coef = coef.ravel()
+            freq[coef > 1e-10] += 1
+        except Exception:
+            continue
+
+    freq /= n_bootstrap  # selection frequency [0, 1]
+
+    if progress_fn:
+        progress_fn("optimal", 95, "Computing stability ranking")
+
+    # Adaptive threshold: start at 0.7, lower if too few genes selected
+    threshold = 0.7
+    while threshold >= 0.3:
+        stable_mask = freq >= threshold
+        if np.sum(stable_mask) >= 2:
+            break
+        threshold -= 0.1
+
+    if np.sum(freq > 0) < 2:
+        # Fallback: rank all by frequency
+        ranked = np.argsort(freq)[::-1][:max_genes]
+    else:
+        # Take stable genes, ranked by frequency
+        stable_indices = np.where(freq > 0)[0]
+        ranked = sorted(stable_indices, key=lambda i: freq[i], reverse=True)[:max_genes]
+
+    ordered_idx = [candidate_idx[i] for i in ranked]
+
+    # Build AUC curve
+    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
+        X_filt, y, ordered_idx, filt_names, classes,
+        model, n_estimators, needs_scaling, n_splits,
+    )
+
+    if progress_fn:
+        progress_fn("optimal", 97, "Stability Selection complete")
+
+    return {
+        "best_genes": best_genes,
+        "best_auc": best_auc,
+        "n_genes": best_n,
+        "auc_curve": auc_curve,
+        "method": "stability",
+    }
+
+
+# ── mRMR (minimum Redundancy Maximum Relevance) ──
+
+def _mrmr_panel(X_filt, y, top_idx, filt_names, classes,
+                model, n_estimators, needs_scaling,
+                n_splits=5, max_genes=15, progress_fn=None):
+    """Greedy mRMR feature selection using mutual information."""
+    from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+
+    candidate_idx = list(top_idx[:max_genes])
+    X_cand = X_filt[:, candidate_idx]
+    n_cand = len(candidate_idx)
+
+    # Precompute relevance: MI(gene, target)
+    relevance = mutual_info_classif(X_cand, y, random_state=42)
+
+    if progress_fn:
+        progress_fn("optimal", 88, "mRMR: relevance computed")
+
+    # Greedy selection
+    selected_local = []  # indices into candidate_idx
+    remaining = set(range(n_cand))
+
+    for step in range(min(max_genes, n_cand)):
+        if not remaining:
+            break
+
+        if step == 0:
+            # First gene: highest relevance
+            best_idx = max(remaining, key=lambda i: relevance[i])
+        else:
+            # Score = relevance - mean redundancy with selected set
+            best_score = -np.inf
+            best_idx = None
+            for cand in remaining:
+                # Redundancy: mean MI with already-selected genes
+                redundancy = 0.0
+                for sel in selected_local:
+                    mi = mutual_info_regression(
+                        X_cand[:, sel].reshape(-1, 1),
+                        X_cand[:, cand],
+                        random_state=42,
+                    )[0]
+                    redundancy += mi
+                redundancy /= len(selected_local)
+                score = relevance[cand] - redundancy
+                if score > best_score:
+                    best_score = score
+                    best_idx = cand
+
+            if best_idx is None:
+                break
+
+        selected_local.append(best_idx)
+        remaining.discard(best_idx)
+
+        if progress_fn and step % 3 == 0:
+            pct = 88 + int(step / max_genes * 9)
+            progress_fn("optimal", pct, f"mRMR step {step + 1}/{max_genes}")
+
+    ordered_idx = [candidate_idx[i] for i in selected_local]
+
+    # Build AUC curve
+    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
+        X_filt, y, ordered_idx, filt_names, classes,
+        model, n_estimators, needs_scaling, n_splits,
+    )
+
+    if progress_fn:
+        progress_fn("optimal", 97, "mRMR panel complete")
+
+    return {
+        "best_genes": best_genes,
+        "best_auc": best_auc,
+        "n_genes": best_n,
+        "auc_curve": auc_curve,
+        "method": "mrmr",
+    }
 
 
 def _compute_cv_roc(X, y, classes, model, n_estimators, cv, needs_scaling):

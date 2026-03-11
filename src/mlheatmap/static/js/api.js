@@ -81,6 +81,7 @@ const API = {
             n_estimators: opts.nEstimators || 500,
             cv_folds: opts.cvFolds || 5,
             model: opts.model || 'rf',
+            panel_method: opts.panelMethod || 'forward',
         });
         return new EventSource(`${this.baseUrl}/biomarker/stream?${params}`);
     },

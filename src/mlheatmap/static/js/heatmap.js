@@ -120,15 +120,17 @@ const Heatmap = {
         const traces = [];
 
         // Layout domain proportions
-        const rowDendroWidth = hasRowDendro ? 0.14 : 0;
+        const rowDendroWidth = hasRowDendro ? 0.08 : 0;
+        const geneNameGap = hasRowDendro ? 0.10 : 0;  // space for gene names between dendro and heatmap
         const colDendroHeight = hasColDendro ? 0.1 : 0;
         const groupBarHeight = hasGroups ? 0.03 : 0;
         const legendSpace = hasGroups ? 0.04 : 0;  // space above for group legend text
         const colorbarSpace = 0.08;
 
-        // Domains — reserve top for: legend → col dendro → group bar → heatmap
-        const xRowDendro = [0, rowDendroWidth - 0.01];
-        const xHeatmap = [rowDendroWidth, 1 - colorbarSpace];
+        // Domains — dendro → gene names gap → heatmap
+        const xRowDendro = [0, rowDendroWidth > 0 ? rowDendroWidth - 0.01 : 0];
+        const heatmapLeft = rowDendroWidth + geneNameGap;
+        const xHeatmap = [heatmapLeft, 1 - colorbarSpace];
         const yHeatmap = [0, 1 - colDendroHeight - groupBarHeight - legendSpace];
         const yGroupBar = [1 - colDendroHeight - groupBarHeight - legendSpace + 0.005, 1 - colDendroHeight - legendSpace - 0.005];
         const yColDendro = [1 - colDendroHeight - legendSpace, 1 - legendSpace];
@@ -187,7 +189,7 @@ const Heatmap = {
         }
 
         // =============================================
-        // 3. ROW DENDROGRAM (left)
+        // 3. ROW DENDROGRAM (left of gene names)
         // =============================================
         if (hasRowDendro) {
             const { icoord, dcoord } = row_dendrogram;
@@ -197,7 +199,7 @@ const Heatmap = {
                     y: icoord[i].map(v => (v - 5) / 10),
                     mode: 'lines',
                     line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x3', yaxis: 'y',
+                    xaxis: 'x3', yaxis: 'y6',
                     showlegend: false, hoverinfo: 'skip',
                 });
             }
@@ -273,7 +275,7 @@ const Heatmap = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 10 },
+            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 10 },
 
             // Main heatmap X (shared by col dendro & group bar)
             xaxis: {
@@ -287,9 +289,11 @@ const Heatmap = {
                 range: [-0.5, nSamples - 0.5],
             },
 
-            // Main heatmap Y (shared by row dendro)
+            // Main heatmap Y — gene names positioned at heatmap left edge
             yaxis: {
                 domain: yHeatmap,
+                anchor: hasRowDendro ? 'free' : undefined,
+                position: hasRowDendro ? heatmapLeft : undefined,
                 tickvals: geneTickVals,
                 ticktext: geneTickText,
                 tickfont: { size: geneFontSize, color: '#94a3b8' },
@@ -319,6 +323,16 @@ const Heatmap = {
                 showticklabels: false, showgrid: false,
                 zeroline: false, showline: false,
                 fixedrange: true,
+            },
+
+            // Row dendrogram Y (separate axis, mirrors heatmap y range)
+            yaxis6: {
+                domain: yHeatmap,
+                anchor: 'x3',
+                range: [-0.5, nGenes - 0.5],
+                autorange: 'reversed',
+                showticklabels: false, showgrid: false,
+                zeroline: false, showline: false,
             },
 
             annotations: [],
@@ -369,18 +383,21 @@ const Heatmap = {
         if (!bioResults) return App.showToast('Run biomarker analysis first', 'error');
         this._isShapMode = true;
 
-        // Use the number of top genes from biomarker results (capped at 100)
-        const nTopGenes = Math.min(bioResults.top_genes ? bioResults.top_genes.length : 20, 100);
+        // Use slider value if within SHAP range, otherwise use biomarker results count
+        const maxShapGenes = bioResults.top_genes ? bioResults.top_genes.length : 20;
+        const sliderVal = parseInt(document.getElementById('topn-slider').value);
+        const nTopGenes = Math.min(sliderVal <= 100 ? sliderVal : maxShapGenes, maxShapGenes);
 
         App.showLoading('Computing SHAP heatmap...');
         try {
+            const clusterRowsEl = document.getElementById('cluster-rows');
             const clusterColsEl = document.getElementById('cluster-cols');
             const data = await API.getShapHeatmap(App.state.sessionId, {
                 topN: nTopGenes,
                 distance: document.getElementById('distance-select').value,
                 linkage: document.getElementById('linkage-select').value,
                 colorScale: document.getElementById('colorscale-select').value,
-                clusterRows: false,  // Keep SHAP rank order by default
+                clusterRows: clusterRowsEl ? clusterRowsEl.checked : false,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
 
@@ -421,16 +438,18 @@ const Heatmap = {
 
         const traces = [];
 
-        // Layout proportions — heatmap + SHAP bar on right
-        const rowDendroWidth = hasRowDendro ? 0.10 : 0;
+        // Layout proportions — dendro → gene names → heatmap + SHAP bar on right
+        const rowDendroWidth = hasRowDendro ? 0.07 : 0;
+        const geneNameGap = hasRowDendro ? 0.10 : 0;  // space for gene names
         const shapBarWidth = 0.18;  // right side SHAP bar
         const colDendroHeight = hasColDendro ? 0.10 : 0;
         const groupBarHeight = hasGroups ? 0.03 : 0;
         const legendSpace = hasGroups ? 0.04 : 0;
         const gapBetween = 0.02;
 
-        const xRowDendro = [0, rowDendroWidth - 0.01];
-        const xHeatmap = [rowDendroWidth, 1 - shapBarWidth - gapBetween];
+        const xRowDendro = [0, rowDendroWidth > 0 ? rowDendroWidth - 0.01 : 0];
+        const heatmapLeft = rowDendroWidth + geneNameGap;
+        const xHeatmap = [heatmapLeft, 1 - shapBarWidth - gapBetween];
         const xShapBar = [1 - shapBarWidth + 0.01, 1];
         const yHeatmap = [0, 1 - colDendroHeight - groupBarHeight - legendSpace];
         const yGroupBar = [1 - colDendroHeight - groupBarHeight - legendSpace + 0.005, 1 - colDendroHeight - legendSpace - 0.005];
@@ -489,7 +508,7 @@ const Heatmap = {
         }
 
         // =============================================
-        // 3. ROW DENDROGRAM
+        // 3. ROW DENDROGRAM (left of gene names)
         // =============================================
         if (hasRowDendro) {
             const { icoord, dcoord } = row_dendrogram;
@@ -499,7 +518,7 @@ const Heatmap = {
                     y: icoord[i].map(v => (v - 5) / 10),
                     mode: 'lines',
                     line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x3', yaxis: 'y',
+                    xaxis: 'x3', yaxis: 'y6',
                     showlegend: false, hoverinfo: 'skip',
                 });
             }
@@ -589,7 +608,7 @@ const Heatmap = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
+            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
 
             xaxis: {
                 domain: xHeatmap,
@@ -601,8 +620,11 @@ const Heatmap = {
                 range: [-0.5, nSamples - 0.5],
             },
 
+            // Gene names positioned at heatmap left edge (right of dendrogram)
             yaxis: {
                 domain: yHeatmap,
+                anchor: hasRowDendro ? 'free' : undefined,
+                position: hasRowDendro ? heatmapLeft : undefined,
                 tickvals: geneTickVals, ticktext: geneTickText,
                 tickfont: { size: geneFontSize, color: '#94a3b8' },
                 autorange: 'reversed',
@@ -638,6 +660,16 @@ const Heatmap = {
                 tickfont: { size: 8, color: '#64748b' },
                 title: { text: 'SHAP', font: { size: 9, color: '#94a3b8' } },
                 side: 'bottom',
+            },
+
+            // Row dendrogram Y (separate axis, mirrors heatmap y range)
+            yaxis6: {
+                domain: yHeatmap,
+                anchor: 'x3',
+                range: [-0.5, nGenes - 0.5],
+                autorange: 'reversed',
+                showticklabels: false, showgrid: false,
+                zeroline: false, showline: false,
             },
 
             annotations: [],
