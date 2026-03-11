@@ -1117,8 +1117,7 @@ tbody tr:hover {
 .heatmap-container {
     margin-bottom: 20px;
     padding: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: auto;
 }
 
 /* Range slider */
