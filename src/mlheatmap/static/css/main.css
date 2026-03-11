@@ -1162,6 +1162,17 @@ input[type="range"]::-webkit-slider-thumb {
     margin-bottom: 24px;
 }
 
+.model-warning {
+    flex-basis: 100%;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #f59e0b;
+}
+
 .progress-container {
     margin-bottom: 24px;
 }
