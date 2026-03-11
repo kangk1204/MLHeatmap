@@ -76,13 +76,7 @@ const Biomarker = {
             App.state.biomarkerResults = data;
             this.showResults(data);
             App.markStepCompleted('biomarker');
-
-            // Auto-navigate to Heatmap and render SHAP heatmap
-            setTimeout(() => {
-                App.goToPanel('heatmap');
-                Heatmap.renderShapHeatmap();
-                App.showToast('SHAP Heatmap generated', 'success');
-            }, 800);
+            App.showToast('Analysis complete — review results below', 'success');
         });
 
         es.addEventListener('error', (e) => {
