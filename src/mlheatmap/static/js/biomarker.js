@@ -30,6 +30,19 @@ const Biomarker = {
                     model === 'lightgbm' ? 'Boosting Rounds' : 'Trees';
             }
         }
+
+        // Show sample-size warning for boosting models
+        const warningEl = document.getElementById('model-warning');
+        if (warningEl) {
+            const nSamples = (App.state.sampleNames || []).length;
+            const isBoosting = ['xgboost', 'lightgbm'].includes(model);
+            if (isBoosting && nSamples > 0 && nSamples < 30) {
+                warningEl.textContent = `Warning: ${model === 'lightgbm' ? 'LightGBM' : 'XGBoost'} may perform poorly with only ${nSamples} samples. Boosting models need 30+ samples for reliable results. Consider Random Forest or Logistic Regression (L1) instead.`;
+                warningEl.classList.remove('hidden');
+            } else {
+                warningEl.classList.add('hidden');
+            }
+        }
     },
 
     run() {
