@@ -67,11 +67,13 @@ const Biomarker = {
         progressFill.style.width = '0%';
 
         const modelSelect = document.getElementById('model-select');
+        const panelSelect = document.getElementById('panel-method-select');
         const es = API.biomarkerStream(App.state.sessionId, {
             nTopGenes: parseInt(document.getElementById('n-top-genes').value),
             nEstimators: parseInt(document.getElementById('n-estimators').value),
             cvFolds: parseInt(document.getElementById('cv-folds').value),
             model: modelSelect ? modelSelect.value : 'rf',
+            panelMethod: panelSelect ? panelSelect.value : 'forward',
         });
 
         es.addEventListener('progress', (e) => {
@@ -271,9 +273,15 @@ const Biomarker = {
         const shapSorted = [...topGenes].sort((a, b) => b.shap_mean_abs - a.shap_mean_abs);
         shapSorted.forEach((g, i) => { shapRankMap[g.symbol] = i + 1; });
 
-        // Method description
+        // Method description (dynamic based on method used)
         const descEl = document.getElementById('optimal-method-desc');
-        descEl.textContent = 'Forward selection from SHAP top candidates: at each step, the gene yielding the highest CV-AUC is added. Selection order may differ from SHAP ranking.';
+        const methodDescs = {
+            forward: 'Forward selection from SHAP top candidates: at each step, the gene yielding the highest CV-AUC is added. Selection order may differ from SHAP ranking.',
+            lasso: 'LASSO (L1-penalized logistic regression) selects genes with non-zero coefficients, ranked by absolute coefficient magnitude. Naturally produces sparse panels.',
+            stability: 'Stability Selection bootstraps LASSO 100× on random 80% subsamples. Genes selected in ≥70% of iterations are deemed stable. Ranked by selection frequency.',
+            mrmr: 'mRMR (minimum Redundancy Maximum Relevance) greedily selects genes maximizing mutual information with the target while minimizing redundancy with already-selected genes.',
+        };
+        descEl.textContent = methodDescs[combo.method] || methodDescs.forward;
 
         // Summary badge
         const summary = document.getElementById('optimal-combo-summary');
