@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/css/main.css?v=16">
+    <link rel="stylesheet" href="/static/css/main.css?v=17">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
 </head>
 <body>
@@ -70,19 +70,19 @@
                     </div>
                     <div class="step-check">✓</div>
                 </button>
-                <button class="nav-step" data-panel="heatmap" id="nav-heatmap">
-                    <div class="step-number">5</div>
-                    <div class="step-info">
-                        <span class="step-title">Heatmap</span>
-                        <span class="step-desc">Visualize</span>
-                    </div>
-                    <div class="step-check">✓</div>
-                </button>
                 <button class="nav-step" data-panel="biomarker" id="nav-biomarker">
-                    <div class="step-number">6</div>
+                    <div class="step-number">5</div>
                     <div class="step-info">
                         <span class="step-title">Biomarker</span>
                         <span class="step-desc">SHAP analysis</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="heatmap" id="nav-heatmap">
+                    <div class="step-number">6</div>
+                    <div class="step-info">
+                        <span class="step-title">Heatmap</span>
+                        <span class="step-desc">Visualize</span>
                     </div>
                     <div class="step-check">✓</div>
                 </button>
@@ -324,89 +324,13 @@
                         Regex Group
                     </button>
                     <button class="btn btn-primary btn-next" id="btn-to-heatmap">
-                        Continue to Heatmap
+                        Continue to Biomarker
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </button>
                 </div>
             </section>
 
-            <!-- Heatmap Panel -->
-            <section class="panel" id="panel-heatmap">
-                <div class="panel-header">
-                    <h1>Heatmap</h1>
-                    <p class="panel-subtitle">Interactive clustered heatmap of expression data</p>
-                </div>
-
-                <div class="heatmap-controls glass-card">
-                    <div class="control-group">
-                        <label>Top Genes</label>
-                        <input type="range" id="topn-slider" min="50" max="2000" value="500" step="50">
-                        <span id="topn-value">500</span>
-                    </div>
-                    <div class="control-group">
-                        <label>Distance</label>
-                        <select id="distance-select" class="select-input">
-                            <option value="correlation">Correlation</option>
-                            <option value="euclidean">Euclidean</option>
-                            <option value="cosine">Cosine</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label>Linkage</label>
-                        <select id="linkage-select" class="select-input">
-                            <option value="average">Average</option>
-                            <option value="ward">Ward</option>
-                            <option value="complete">Complete</option>
-                            <option value="single">Single</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label>Color Scale</label>
-                        <select id="colorscale-select" class="select-input">
-                            <option value="RdBu_r">Red-Blue</option>
-                            <option value="RdYlBu_r">Red-Yellow-Blue</option>
-                            <option value="Viridis">Viridis</option>
-                            <option value="Inferno">Inferno</option>
-                            <option value="Plasma">Plasma</option>
-                        </select>
-                    </div>
-                    <div class="control-group">
-                        <label>Clustering</label>
-                        <div class="checkbox-group">
-                            <label class="checkbox-label"><input type="checkbox" id="cluster-rows" checked> Rows</label>
-                            <label class="checkbox-label"><input type="checkbox" id="cluster-cols" checked> Columns</label>
-                        </div>
-                    </div>
-                    <button class="btn btn-primary" id="btn-render-heatmap">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                        Render Heatmap
-                    </button>
-                </div>
-
-                <div class="heatmap-size-controls glass-card">
-                    <div class="control-group">
-                        <label>Width</label>
-                        <input type="range" id="heatmap-width-slider" min="0" max="2400" value="0" step="50">
-                        <span id="heatmap-width-value">Auto</span>
-                    </div>
-                    <div class="control-group">
-                        <label>Height</label>
-                        <input type="range" id="heatmap-height-slider" min="400" max="3000" value="800" step="50">
-                        <span id="heatmap-height-value">800px</span>
-                    </div>
-                </div>
-
-                <div class="heatmap-container glass-card" id="heatmap-wrapper">
-                    <div id="heatmap-plot" style="width:100%;min-height:500px;"></div>
-                </div>
-
-                <button class="btn btn-primary btn-next" id="btn-to-biomarker">
-                    Continue to Biomarker Analysis
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                </button>
-            </section>
-
-            <!-- Biomarker Panel -->
+            <!-- Biomarker Panel (Step 5) -->
             <section class="panel" id="panel-biomarker">
                 <div class="panel-header">
                     <h1>Biomarker Discovery</h1>
@@ -484,16 +408,88 @@
                         </div>
                     </div>
                     <div class="biomarker-actions">
-                        <button class="btn btn-primary" id="btn-shap-heatmap">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8" rx="1"/><rect x="12" y="6" width="3" height="12" rx="1"/><rect x="17" y="12" width="3" height="6" rx="1"/></svg>
-                            View SHAP Heatmap
-                        </button>
                         <button class="btn btn-primary btn-next" id="btn-to-export">
-                            Continue to Export
+                            Continue to Heatmap
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                         </button>
                     </div>
                 </div>
+            </section>
+
+            <!-- Heatmap Panel (Step 6) -->
+            <section class="panel" id="panel-heatmap">
+                <div class="panel-header">
+                    <h1>Heatmap</h1>
+                    <p class="panel-subtitle">Interactive clustered heatmap of expression data</p>
+                </div>
+
+                <div class="heatmap-controls glass-card">
+                    <div class="control-group">
+                        <label>Top Genes</label>
+                        <input type="range" id="topn-slider" min="50" max="2000" value="500" step="50">
+                        <span id="topn-value">500</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Distance</label>
+                        <select id="distance-select" class="select-input">
+                            <option value="correlation">Correlation</option>
+                            <option value="euclidean">Euclidean</option>
+                            <option value="cosine">Cosine</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Linkage</label>
+                        <select id="linkage-select" class="select-input">
+                            <option value="average">Average</option>
+                            <option value="ward">Ward</option>
+                            <option value="complete">Complete</option>
+                            <option value="single">Single</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Color Scale</label>
+                        <select id="colorscale-select" class="select-input">
+                            <option value="RdBu_r">Red-Blue</option>
+                            <option value="RdYlBu_r">Red-Yellow-Blue</option>
+                            <option value="Viridis">Viridis</option>
+                            <option value="Inferno">Inferno</option>
+                            <option value="Plasma">Plasma</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Clustering</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="cluster-rows" checked> Rows</label>
+                            <label class="checkbox-label"><input type="checkbox" id="cluster-cols" checked> Columns</label>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="btn-render-heatmap">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                        Render Heatmap
+                    </button>
+                </div>
+
+                <div class="heatmap-size-controls glass-card">
+                    <div class="control-group">
+                        <label>Width</label>
+                        <input type="range" id="heatmap-width-slider" min="0" max="2400" value="0" step="50">
+                        <span id="heatmap-width-value">Auto</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Height</label>
+                        <input type="range" id="heatmap-height-slider" min="400" max="3000" value="800" step="50">
+                        <span id="heatmap-height-value">800px</span>
+                    </div>
+                </div>
+
+                <div class="heatmap-container glass-card" id="heatmap-wrapper">
+                    <div id="heatmap-plot" style="width:100%;min-height:500px;"></div>
+                </div>
+
+                <button class="btn btn-primary btn-next" id="btn-to-biomarker">
+                    Continue to Export
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
             </section>
 
             <!-- Export Panel -->
@@ -564,12 +560,12 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/js/api.js?v=16"></script>
-    <script src="/static/js/upload.js?v=16"></script>
-    <script src="/static/js/heatmap.js?v=16"></script>
-    <script src="/static/js/groups.js?v=16"></script>
-    <script src="/static/js/biomarker.js?v=16"></script>
-    <script src="/static/js/export.js?v=16"></script>
-    <script src="/static/js/app.js?v=16"></script>
+    <script src="/static/js/api.js?v=17"></script>
+    <script src="/static/js/upload.js?v=17"></script>
+    <script src="/static/js/heatmap.js?v=17"></script>
+    <script src="/static/js/groups.js?v=17"></script>
+    <script src="/static/js/biomarker.js?v=17"></script>
+    <script src="/static/js/export.js?v=17"></script>
+    <script src="/static/js/app.js?v=17"></script>
 </body>
 </html>

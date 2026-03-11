@@ -15,15 +15,7 @@ const Heatmap = {
         slider.addEventListener('input', () => label.textContent = slider.value);
 
         document.getElementById('btn-render-heatmap').addEventListener('click', () => this.render());
-        document.getElementById('btn-to-biomarker').addEventListener('click', () => App.goToPanel('biomarker'));
-
-        const shapBtn = document.getElementById('btn-shap-heatmap');
-        if (shapBtn) {
-            shapBtn.addEventListener('click', () => {
-                App.goToPanel('heatmap');
-                this.renderShapHeatmap();
-            });
-        }
+        document.getElementById('btn-to-biomarker').addEventListener('click', () => App.goToPanel('export'));
 
         // Dynamic heatmap size controls
         const widthSlider = document.getElementById('heatmap-width-slider');
