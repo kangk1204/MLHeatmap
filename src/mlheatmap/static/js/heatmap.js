@@ -359,7 +359,7 @@ const Heatmap = {
             modeBarButtonsToRemove: ['lasso2d', 'select2d'],
             displaylogo: false,
             toImageButtonOptions: { format: 'png', height: 1600, width: 2000, scale: 2 },
-        });
+        }).then(() => this._resizePlot());
     },
 
     async renderShapHeatmap() {
@@ -462,10 +462,10 @@ const Heatmap = {
             colorbar: {
                 title: { text: 'Z-score', font: { color: '#e2e8f0', size: 10 } },
                 tickfont: { color: '#94a3b8', size: 9 },
-                thickness: 10, len: 0.25,
-                y: -0.02, yanchor: 'top',
-                x: xHeatmap[0] + 0.01, xanchor: 'left',
-                orientation: 'h',
+                thickness: 12, len: 0.3,
+                y: 0.15, yanchor: 'middle',
+                x: 1.02, xanchor: 'left',
+                orientation: 'v',
                 outlinewidth: 0,
                 tickvals: [-3, 0, 3],
             },
@@ -589,7 +589,7 @@ const Heatmap = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: leftMargin, r: 60, t: hasGroups ? 40 : 25, b: 60 },
+            margin: { l: leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
 
             xaxis: {
                 domain: xHeatmap,
@@ -676,7 +676,7 @@ const Heatmap = {
             modeBarButtonsToRemove: ['lasso2d', 'select2d'],
             displaylogo: false,
             toImageButtonOptions: { format: 'png', height: 1600, width: 2000, scale: 2 },
-        });
+        }).then(() => this._resizePlot());
     },
 
     _getColorScale(name) {

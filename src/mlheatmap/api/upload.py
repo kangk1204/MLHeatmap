@@ -29,9 +29,9 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         if filename.endswith(".xlsx") or filename.endswith(".xls"):
             df = pd.read_excel(io.BytesIO(content), index_col=0, engine="openpyxl")
         elif filename.endswith(".tsv") or filename.endswith(".txt"):
-            df = pd.read_csv(io.BytesIO(content), sep="\t", index_col=0)
+            df = pd.read_csv(io.BytesIO(content), sep="\t", index_col=0, comment="#")
         else:
-            df = pd.read_csv(io.BytesIO(content), index_col=0)
+            df = pd.read_csv(io.BytesIO(content), index_col=0, comment="#")
     except Exception as e:
         return JSONResponse({"error": f"Failed to parse file: {e}"}, status_code=400)
 
