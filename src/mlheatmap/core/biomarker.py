@@ -25,10 +25,12 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name in ("rf", "random_forest"):
         from sklearn.ensemble import RandomForestClassifier
+        # Constrain tree depth for very small samples to reduce overfitting
+        max_d = 3 if n_samples < 20 else (6 if n_samples < 50 else None)
         clf = RandomForestClassifier(
             n_estimators=n_estimators,
-            max_depth=None,
-            min_samples_leaf=max(1, n_samples // 20),
+            max_depth=max_d,
+            min_samples_leaf=max(2, n_samples // 10) if n_samples < 30 else max(1, n_samples // 20),
             class_weight="balanced",
             random_state=42,
             n_jobs=-1,
@@ -37,19 +39,30 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name in ("xgboost", "xgb"):
         from xgboost import XGBClassifier
-        # Adapt parameters for small sample sizes
-        max_d = 3 if n_samples < 30 else 6
-        lr = 0.05 if n_samples < 30 else 0.1
-        sub = 1.0 if n_samples < 20 else 0.8
-        n_est = min(n_estimators, 200) if n_samples < 30 else n_estimators
+        # Aggressively constrain for small sample sizes
+        if n_samples < 20:
+            n_est = min(n_estimators, 50)
+            max_d, lr = 2, 0.1
+            sub, col_sub = 1.0, 0.6
+            reg_a, reg_l = 1.0, 5.0
+        elif n_samples < 50:
+            n_est = min(n_estimators, 200)
+            max_d, lr = 3, 0.05
+            sub, col_sub = 0.9, 0.7
+            reg_a, reg_l = 0.5, 2.0
+        else:
+            n_est = n_estimators
+            max_d, lr = 6, 0.1
+            sub, col_sub = 0.8, 0.8
+            reg_a, reg_l = 0.1, 1.0
         clf = XGBClassifier(
             n_estimators=n_est,
             max_depth=max_d,
             learning_rate=lr,
             subsample=sub,
-            colsample_bytree=0.8,
-            reg_alpha=0.1,
-            reg_lambda=1.0,
+            colsample_bytree=col_sub,
+            reg_alpha=reg_a,
+            reg_lambda=reg_l,
             random_state=42,
             n_jobs=-1,
             verbosity=0,
@@ -58,20 +71,39 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name in ("lightgbm", "lgbm"):
         from lightgbm import LGBMClassifier
-        # Adapt for small sample sizes
-        n_est = min(n_estimators, 200) if n_samples < 30 else n_estimators
-        n_leaves = 15 if n_samples < 30 else 31
-        min_child = max(1, n_samples // 10)
-        sub = 1.0 if n_samples < 20 else 0.8
+        # Aggressively constrain for small sample sizes to prevent overfitting
+        if n_samples < 20:
+            n_est = min(n_estimators, 50)
+            n_leaves = 4
+            min_child = max(2, n_samples // 5)
+            lr = 0.1
+            reg_a, reg_l = 1.0, 5.0
+            sub, col_sub = 1.0, 0.6
+        elif n_samples < 50:
+            n_est = min(n_estimators, 150)
+            n_leaves = 8
+            min_child = max(2, n_samples // 10)
+            lr = 0.05
+            reg_a, reg_l = 0.5, 2.0
+            sub, col_sub = 0.9, 0.7
+        else:
+            n_est = n_estimators
+            n_leaves = 31
+            min_child = max(1, n_samples // 20)
+            lr = 0.05
+            reg_a, reg_l = 0.1, 1.0
+            sub, col_sub = 0.8, 0.8
         clf = LGBMClassifier(
             n_estimators=n_est,
             num_leaves=n_leaves,
-            max_depth=-1,
-            learning_rate=0.05,
+            max_depth=3 if n_samples < 20 else -1,
+            learning_rate=lr,
             subsample=sub,
             subsample_freq=1 if sub < 1.0 else 0,
-            colsample_bytree=0.8,
+            colsample_bytree=col_sub,
             min_child_samples=min_child,
+            reg_alpha=reg_a,
+            reg_lambda=reg_l,
             is_unbalance=True,
             random_state=42,
             n_jobs=-1,

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/css/main.css?v=19">
+    <link rel="stylesheet" href="/static/css/main.css?v=20">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
 </head>
 <body>
@@ -385,7 +385,8 @@
                         </div>
                     </div>
                     <div class="glass-card result-card">
-                        <h3>Optimal Gene Combination (by AUC)</h3>
+                        <h3>Optimal Gene Combination</h3>
+                        <p class="method-desc" id="optimal-method-desc"></p>
                         <div class="optimal-combo-summary" id="optimal-combo-summary"></div>
                         <div id="optimal-auc-curve" style="width:100%;height:350px;"></div>
                         <div class="optimal-gene-list" id="optimal-gene-list"></div>
@@ -560,12 +561,12 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/js/api.js?v=19"></script>
-    <script src="/static/js/upload.js?v=19"></script>
-    <script src="/static/js/heatmap.js?v=19"></script>
-    <script src="/static/js/groups.js?v=19"></script>
-    <script src="/static/js/biomarker.js?v=19"></script>
-    <script src="/static/js/export.js?v=19"></script>
-    <script src="/static/js/app.js?v=19"></script>
+    <script src="/static/js/api.js?v=20"></script>
+    <script src="/static/js/upload.js?v=20"></script>
+    <script src="/static/js/heatmap.js?v=20"></script>
+    <script src="/static/js/groups.js?v=20"></script>
+    <script src="/static/js/biomarker.js?v=20"></script>
+    <script src="/static/js/export.js?v=20"></script>
+    <script src="/static/js/app.js?v=20"></script>
 </body>
 </html>

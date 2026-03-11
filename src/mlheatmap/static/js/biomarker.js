@@ -252,6 +252,16 @@ const Biomarker = {
     },
 
     showOptimalCombo(combo) {
+        // Build SHAP rank lookup from top_genes
+        const topGenes = App.state.biomarkerResults ? App.state.biomarkerResults.top_genes : [];
+        const shapRankMap = {};
+        const shapSorted = [...topGenes].sort((a, b) => b.shap_mean_abs - a.shap_mean_abs);
+        shapSorted.forEach((g, i) => { shapRankMap[g.symbol] = i + 1; });
+
+        // Method description
+        const descEl = document.getElementById('optimal-method-desc');
+        descEl.textContent = 'Forward selection from SHAP top candidates: at each step, the gene yielding the highest CV-AUC is added. Selection order may differ from SHAP ranking.';
+
         // Summary badge
         const summary = document.getElementById('optimal-combo-summary');
         const aucPct = (combo.best_auc * 100).toFixed(1);
@@ -263,7 +273,7 @@ const Biomarker = {
         badge.textContent = `Best AUC: ${aucPct}% with ${combo.n_genes} gene${combo.n_genes > 1 ? 's' : ''}`;
         summary.appendChild(badge);
 
-        // AUC vs #genes curve
+        // AUC vs #genes curve (with SHAP rank in tooltip)
         const curve = combo.auc_curve;
         const trace = {
             x: curve.map(c => c.n_genes),
@@ -271,7 +281,10 @@ const Biomarker = {
             mode: 'lines+markers',
             line: { color: '#8b5cf6', width: 2.5 },
             marker: { size: 8, color: '#8b5cf6', line: { color: '#fff', width: 1 } },
-            text: curve.map(c => `+${c.gene_added}`),
+            text: curve.map(c => {
+                const sr = shapRankMap[c.gene_added];
+                return sr ? `+${c.gene_added} (SHAP #${sr})` : `+${c.gene_added}`;
+            }),
             hovertemplate: '<b>%{x} genes</b><br>AUC: %{y:.4f}<br>Added: %{text}<extra></extra>',
         };
         // Highlight best point
@@ -309,15 +322,26 @@ const Biomarker = {
             displayModeBar: false,
         });
 
-        // Gene list chips
+        // Gene list chips with SHAP rank
         const listEl = document.getElementById('optimal-gene-list');
         listEl.innerHTML = '<h4 style="margin:0 0 8px;color:var(--text-primary)">Optimal Gene Set:</h4>';
         const chipContainer = document.createElement('div');
         chipContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+
         combo.best_genes.forEach((gene, i) => {
             const chip = document.createElement('span');
             chip.className = 'optimal-gene-chip';
             chip.textContent = `${i + 1}. ${gene}`;
+
+            // Show SHAP rank
+            const shapRank = shapRankMap[gene];
+            if (shapRank) {
+                const tag = document.createElement('span');
+                tag.className = 'shap-rank-tag';
+                tag.textContent = `SHAP #${shapRank}`;
+                chip.appendChild(tag);
+            }
+
             chipContainer.appendChild(chip);
         });
         listEl.appendChild(chipContainer);
