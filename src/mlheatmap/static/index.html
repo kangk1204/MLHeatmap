@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/css/main.css?v=30">
+    <link rel="stylesheet" href="/static/css/main.css?v=31">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
 </head>
 <body>
@@ -506,8 +506,9 @@
                 <div class="heatmap-controls glass-card">
                     <div class="control-group">
                         <label>Top Genes</label>
-                        <input type="range" id="topn-slider" min="50" max="2000" value="500" step="50">
+                        <input type="range" id="topn-slider" min="50" max="60000" value="500" step="50">
                         <span id="topn-value">500</span>
+                        <span id="render-mode-badge" class="badge badge-purple" style="display:none;"></span>
                     </div>
                     <div class="control-group">
                         <label>Distance</label>
@@ -640,12 +641,12 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/js/api.js?v=30"></script>
-    <script src="/static/js/upload.js?v=30"></script>
-    <script src="/static/js/heatmap.js?v=30"></script>
-    <script src="/static/js/groups.js?v=30"></script>
-    <script src="/static/js/biomarker.js?v=30"></script>
-    <script src="/static/js/export.js?v=30"></script>
-    <script src="/static/js/app.js?v=30"></script>
+    <script src="/static/js/api.js?v=31"></script>
+    <script src="/static/js/upload.js?v=31"></script>
+    <script src="/static/js/heatmap.js?v=31"></script>
+    <script src="/static/js/groups.js?v=31"></script>
+    <script src="/static/js/biomarker.js?v=31"></script>
+    <script src="/static/js/export.js?v=31"></script>
+    <script src="/static/js/app.js?v=31"></script>
 </body>
 </html>
