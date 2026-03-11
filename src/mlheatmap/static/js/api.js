@@ -86,6 +86,27 @@ const API = {
         return new EventSource(`${this.baseUrl}/biomarker/stream?${params}`);
     },
 
+    async getHeatmapImage(sessionId, opts = {}) {
+        const params = new URLSearchParams({
+            session_id: sessionId,
+            top_n: opts.topN || 500,
+            distance: opts.distance || 'correlation',
+            linkage: opts.linkage || 'average',
+            color_scale: opts.colorScale || 'RdBu_r',
+            cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
+            cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
+            fmt: opts.fmt || 'png',
+            dpi: opts.dpi || 150,
+        });
+        const res = await fetch(`${this.baseUrl}/heatmap/render?${params}`);
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Server render failed');
+        }
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+    },
+
     async getShapHeatmap(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,

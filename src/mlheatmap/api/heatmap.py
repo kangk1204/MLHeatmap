@@ -1,7 +1,9 @@
 """Heatmap API endpoints."""
 
+import asyncio
+
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 router = APIRouter(tags=["heatmap"])
 
@@ -10,7 +12,7 @@ router = APIRouter(tags=["heatmap"])
 async def get_heatmap(
     request: Request,
     session_id: str = Query(...),
-    top_n: int = Query(500, ge=10, le=5000),
+    top_n: int = Query(500, ge=10, le=10000),
     distance: str = Query("correlation"),
     linkage: str = Query("average"),
     color_scale: str = Query("RdBu_r"),
@@ -52,6 +54,57 @@ async def get_heatmap(
     response["color_scale"] = color_scale
 
     return response
+
+
+@router.get("/heatmap/render")
+async def render_heatmap(
+    request: Request,
+    session_id: str = Query(...),
+    top_n: int = Query(500, ge=10, le=60000),
+    distance: str = Query("correlation"),
+    linkage: str = Query("average"),
+    color_scale: str = Query("RdBu_r"),
+    cluster_rows: bool = Query(True),
+    cluster_cols: bool = Query(True),
+    fmt: str = Query("png"),
+    dpi: int = Query(150, ge=72, le=600),
+):
+    """Server-side rendered heatmap image for large gene sets."""
+    from mlheatmap.core.server_render import render_heatmap_image
+
+    session = request.app.state.sessions.get(session_id)
+    if not session or session.normalized is None:
+        return JSONResponse({"error": "No normalized data"}, status_code=404)
+
+    # Exclude samples
+    sample_mask = [
+        i for i, s in enumerate(session.sample_names)
+        if s not in session.excluded_samples
+    ]
+    expression = session.normalized[:, sample_mask]
+    sample_names = [session.sample_names[i] for i in sample_mask]
+
+    try:
+        image_bytes = await asyncio.to_thread(
+            render_heatmap_image,
+            expression=expression,
+            gene_names=session.gene_names,
+            sample_names=sample_names,
+            groups=session.groups,
+            top_n=min(top_n, expression.shape[0]),
+            distance=distance,
+            method=linkage,
+            color_scale=color_scale,
+            cluster_rows=cluster_rows,
+            cluster_cols=cluster_cols,
+            fmt=fmt,
+            dpi=dpi,
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    media = "image/svg+xml" if fmt == "svg" else "image/png"
+    return Response(image_bytes, media_type=media, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/heatmap/shap")

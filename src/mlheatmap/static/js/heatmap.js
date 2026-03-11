@@ -2,6 +2,8 @@
 const Heatmap = {
     _isShapMode: false,
     _isDegMode: false,
+    _serverImageUrl: null,  // Track blob URL for cleanup
+    SERVER_RENDER_THRESHOLD: 5000,
     GROUP_COLORS: ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
                    '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
 
@@ -14,7 +16,26 @@ const Heatmap = {
     init() {
         const slider = document.getElementById('topn-slider');
         const label = document.getElementById('topn-value');
-        slider.addEventListener('input', () => label.textContent = slider.value);
+        slider.addEventListener('input', () => {
+            const val = parseInt(slider.value);
+            label.textContent = val >= 1000 ? (val / 1000).toFixed(val % 1000 === 0 ? 0 : 1) + 'K' : val;
+
+            // Adaptive step size
+            if (val > 10000) slider.step = 1000;
+            else if (val > 5000) slider.step = 500;
+            else slider.step = 50;
+
+            // Render mode badge
+            const badge = document.getElementById('render-mode-badge');
+            if (badge) {
+                if (val > this.SERVER_RENDER_THRESHOLD) {
+                    badge.textContent = 'Server Render';
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        });
 
         document.getElementById('btn-render-heatmap').addEventListener('click', () => {
             if (this._isDegMode && App.state.degResults) {
@@ -48,6 +69,8 @@ const Heatmap = {
     },
 
     _resizePlot() {
+        // Skip if showing server-rendered image
+        if (document.getElementById('server-heatmap-viewer')) return;
         const plotEl = document.getElementById('heatmap-plot');
         if (!plotEl || !plotEl.data || plotEl.data.length === 0) return;
 
@@ -70,13 +93,21 @@ const Heatmap = {
     async render() {
         if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
         this._isShapMode = false;
+        this._isDegMode = false;
+
+        const topN = parseInt(document.getElementById('topn-slider').value);
+
+        // Auto-switch to server-side rendering for large gene sets
+        if (topN > this.SERVER_RENDER_THRESHOLD) {
+            return this.renderServerSide(topN);
+        }
 
         App.showLoading('Computing heatmap...');
         try {
             const clusterRowsEl = document.getElementById('cluster-rows');
             const clusterColsEl = document.getElementById('cluster-cols');
             const data = await API.getHeatmap(App.state.sessionId, {
-                topN: parseInt(document.getElementById('topn-slider').value),
+                topN: topN,
                 distance: document.getElementById('distance-select').value,
                 linkage: document.getElementById('linkage-select').value,
                 colorScale: document.getElementById('colorscale-select').value,
@@ -97,6 +128,127 @@ const Heatmap = {
         } finally {
             App.hideLoading();
         }
+    },
+
+    async renderServerSide(topN) {
+        App.showLoading(`Rendering ${topN.toLocaleString()} genes on server...`);
+        try {
+            // Clean up previous blob URL
+            if (this._serverImageUrl) {
+                URL.revokeObjectURL(this._serverImageUrl);
+                this._serverImageUrl = null;
+            }
+
+            const clusterRowsEl = document.getElementById('cluster-rows');
+            const clusterColsEl = document.getElementById('cluster-cols');
+            const imageUrl = await API.getHeatmapImage(App.state.sessionId, {
+                topN: topN,
+                distance: document.getElementById('distance-select').value,
+                linkage: document.getElementById('linkage-select').value,
+                colorScale: document.getElementById('colorscale-select').value,
+                clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
+                clusterCols: clusterColsEl ? clusterColsEl.checked : true,
+                dpi: 150,
+            });
+
+            this._serverImageUrl = imageUrl;
+
+            // Update header
+            const header = document.querySelector('#panel-heatmap .panel-header h1');
+            const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
+            if (header) header.textContent = 'Heatmap';
+            if (subtitle) subtitle.textContent = `Top ${topN.toLocaleString()} most variable genes (server-rendered)`;
+
+            this.displayServerImage(imageUrl, topN);
+            App.markStepCompleted('heatmap');
+        } catch (err) {
+            App.showToast('Server render failed: ' + err.message, 'error');
+        } finally {
+            App.hideLoading();
+        }
+    },
+
+    displayServerImage(imageUrl, topN) {
+        const container = document.getElementById('heatmap-plot');
+        // Clear any existing Plotly plot
+        if (container.data) Plotly.purge(container);
+
+        container.innerHTML = `
+            <div class="server-heatmap-viewer" id="server-heatmap-viewer">
+                <div class="server-heatmap-toolbar">
+                    <button class="btn btn-xs btn-outline" id="btn-zoom-in" title="Zoom In">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                    <button class="btn btn-xs btn-outline" id="btn-zoom-out" title="Zoom Out">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                    </button>
+                    <button class="btn btn-xs btn-outline" id="btn-zoom-reset" title="Reset Zoom">Reset</button>
+                    <button class="btn btn-xs btn-outline" id="btn-zoom-fit" title="Fit to View">Fit</button>
+                    <button class="btn btn-xs btn-outline" id="btn-download-server-img" title="Download Image">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download
+                    </button>
+                    <span class="server-heatmap-info">${topN.toLocaleString()} genes · server-rendered</span>
+                </div>
+                <div class="server-heatmap-scroll" id="server-heatmap-scroll">
+                    <img src="${imageUrl}" id="server-heatmap-img" alt="Clustered Heatmap" />
+                </div>
+            </div>
+        `;
+
+        let scale = 1;
+        const img = document.getElementById('server-heatmap-img');
+        const scroll = document.getElementById('server-heatmap-scroll');
+
+        const applyScale = () => {
+            img.style.transform = `scale(${scale})`;
+            img.style.transformOrigin = 'top left';
+        };
+
+        document.getElementById('btn-zoom-in').onclick = () => {
+            scale = Math.min(scale * 1.3, 5);
+            applyScale();
+        };
+        document.getElementById('btn-zoom-out').onclick = () => {
+            scale = Math.max(scale / 1.3, 0.1);
+            applyScale();
+        };
+        document.getElementById('btn-zoom-reset').onclick = () => {
+            scale = 1;
+            applyScale();
+        };
+        document.getElementById('btn-zoom-fit').onclick = () => {
+            // Fit image to scroll container width
+            if (img.naturalWidth > 0) {
+                scale = scroll.clientWidth / img.naturalWidth;
+                applyScale();
+            }
+        };
+        document.getElementById('btn-download-server-img').onclick = () => {
+            const a = document.createElement('a');
+            a.href = imageUrl;
+            a.download = `heatmap_${topN}genes.png`;
+            a.click();
+        };
+
+        // Mouse wheel zoom
+        scroll.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            scale = Math.min(Math.max(scale * delta, 0.1), 5);
+            applyScale();
+        }, { passive: false });
+
+        // Auto-fit on load (use requestAnimationFrame to ensure layout is ready)
+        img.onload = () => {
+            requestAnimationFrame(() => {
+                const sw = scroll.clientWidth || container.clientWidth || 800;
+                if (img.naturalWidth > 0 && sw > 0) {
+                    scale = Math.min(sw / img.naturalWidth, 1);
+                    applyScale();
+                }
+            });
+        };
     },
 
     plotHeatmap(data) {

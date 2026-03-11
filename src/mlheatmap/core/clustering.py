@@ -8,6 +8,25 @@ from scipy.spatial.distance import pdist
 logger = logging.getLogger(__name__)
 
 
+def select_top_variable_genes(
+    expression: np.ndarray,
+    gene_names: list[str],
+    top_n: int,
+) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """Select top-N most variable genes by variance.
+
+    Returns:
+        Tuple of (expression_subset, gene_names_subset, indices)
+    """
+    n_genes = expression.shape[0]
+    top_n = min(top_n, n_genes)
+    variances = np.var(expression, axis=1)
+    top_idx = np.argsort(variances)[-top_n:]
+    expr_sub = expression[top_idx]
+    genes_sub = [gene_names[i] for i in top_idx]
+    return expr_sub, genes_sub, top_idx
+
+
 def compute_heatmap_data(
     expression: np.ndarray,
     gene_names: list[str],
@@ -36,11 +55,8 @@ def compute_heatmap_data(
     n_genes, n_samples = expression.shape
 
     # Select top-N variable genes
-    variances = np.var(expression, axis=1)
-    top_n = min(top_n, n_genes)
-    top_idx = np.argsort(variances)[-top_n:]
-    expr_sub = expression[top_idx]
-    genes_sub = [gene_names[i] for i in top_idx]
+    expr_sub, genes_sub, _ = select_top_variable_genes(expression, gene_names, top_n)
+    top_n = len(genes_sub)
 
     # Row clustering (genes)
     row_dendro_data = None
