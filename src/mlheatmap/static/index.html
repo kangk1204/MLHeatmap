@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLHeatmap</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css?v=14">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                            <rect x="2" y="2" width="7" height="7" rx="1.5" fill="#3b82f6" opacity="0.9"/>
+                            <rect x="10.5" y="2" width="7" height="7" rx="1.5" fill="#8b5cf6" opacity="0.7"/>
+                            <rect x="19" y="2" width="7" height="7" rx="1.5" fill="#3b82f6" opacity="0.5"/>
+                            <rect x="2" y="10.5" width="7" height="7" rx="1.5" fill="#8b5cf6" opacity="0.6"/>
+                            <rect x="10.5" y="10.5" width="7" height="7" rx="1.5" fill="#ec4899" opacity="0.8"/>
+                            <rect x="19" y="10.5" width="7" height="7" rx="1.5" fill="#8b5cf6" opacity="0.7"/>
+                            <rect x="2" y="19" width="7" height="7" rx="1.5" fill="#3b82f6" opacity="0.4"/>
+                            <rect x="10.5" y="19" width="7" height="7" rx="1.5" fill="#8b5cf6" opacity="0.6"/>
+                            <rect x="19" y="19" width="7" height="7" rx="1.5" fill="#ef4444" opacity="0.9"/>
+                        </svg>
+                    </div>
+                    <div class="logo-text">
+                        <span class="logo-name">MLHeatmap</span>
+                        <span class="logo-version">v0.1.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="nav-steps">
+                <button class="nav-step active" data-panel="upload" id="nav-upload">
+                    <div class="step-number">1</div>
+                    <div class="step-info">
+                        <span class="step-title">Upload</span>
+                        <span class="step-desc">Count matrix</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="mapping" id="nav-mapping">
+                    <div class="step-number">2</div>
+                    <div class="step-info">
+                        <span class="step-title">Gene Mapping</span>
+                        <span class="step-desc">ID → Symbol</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="normalize" id="nav-normalize">
+                    <div class="step-number">3</div>
+                    <div class="step-info">
+                        <span class="step-title">Normalize</span>
+                        <span class="step-desc">Transform data</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="groups" id="nav-groups">
+                    <div class="step-number">4</div>
+                    <div class="step-info">
+                        <span class="step-title">Groups</span>
+                        <span class="step-desc">Assign samples</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="heatmap" id="nav-heatmap">
+                    <div class="step-number">5</div>
+                    <div class="step-info">
+                        <span class="step-title">Heatmap</span>
+                        <span class="step-desc">Visualize</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="biomarker" id="nav-biomarker">
+                    <div class="step-number">6</div>
+                    <div class="step-info">
+                        <span class="step-title">Biomarker</span>
+                        <span class="step-desc">SHAP analysis</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+                <button class="nav-step" data-panel="export" id="nav-export">
+                    <div class="step-number">7</div>
+                    <div class="step-info">
+                        <span class="step-title">Export</span>
+                        <span class="step-desc">Save results</span>
+                    </div>
+                    <div class="step-check">✓</div>
+                </button>
+            </div>
+
+            <div class="sidebar-footer">
+                <a href="https://github.com" target="_blank" class="sidebar-link">GitHub</a>
+                <span class="sidebar-divider">·</span>
+                <span class="sidebar-link" id="help-btn">Help</span>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="content">
+            <!-- Upload Panel -->
+            <section class="panel active" id="panel-upload">
+                <div class="panel-header">
+                    <h1>Upload Count Matrix</h1>
+                    <p class="panel-subtitle">Upload your Bulk RNA-seq raw read count matrix (CSV, TSV, or Excel)</p>
+                </div>
+
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </div>
+                    <h3>Drag & drop your file here</h3>
+                    <p>or click to browse</p>
+                    <div class="upload-formats">
+                        <span class="format-badge">.csv</span>
+                        <span class="format-badge">.tsv</span>
+                        <span class="format-badge">.xlsx</span>
+                        <span class="format-badge">.txt</span>
+                    </div>
+                    <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xls" hidden>
+                </div>
+
+                <div class="upload-result hidden" id="upload-result">
+                    <div class="result-badges">
+                        <span class="badge badge-blue" id="badge-shape"></span>
+                        <span class="badge badge-purple" id="badge-species"></span>
+                        <span class="badge badge-cyan" id="badge-idtype"></span>
+                    </div>
+
+                    <div class="filter-info glass-card hidden" id="filter-info">
+                        <div class="filter-header">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                            <h3>Low-Expression Gene Filter</h3>
+                        </div>
+                        <p class="filter-desc">Genes with count &lt; <strong id="filter-min-count">10</strong> in fewer than <strong id="filter-min-samples">20%</strong> of samples were removed for memory efficiency and faster analysis.</p>
+                        <div class="filter-stats">
+                            <span class="filter-stat"><span class="filter-stat-value" id="filter-before">0</span> total genes</span>
+                            <span class="filter-arrow">→</span>
+                            <span class="filter-stat"><span class="filter-stat-value filter-green" id="filter-after">0</span> kept</span>
+                            <span class="filter-stat"><span class="filter-stat-value filter-red" id="filter-removed">0</span> removed</span>
+                        </div>
+                    </div>
+
+                    <div class="data-preview glass-card">
+                        <h3>Data Preview</h3>
+                        <div class="table-wrapper">
+                            <table id="preview-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-next" id="btn-to-mapping">
+                        Continue to Gene Mapping
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Gene Mapping Panel -->
+            <section class="panel" id="panel-mapping">
+                <div class="panel-header">
+                    <h1>Gene ID Mapping</h1>
+                    <p class="panel-subtitle">Map gene identifiers to official gene symbols</p>
+                </div>
+
+                <div class="mapping-controls glass-card">
+                    <div class="control-row">
+                        <div class="control-group">
+                            <label>Species</label>
+                            <div class="radio-group">
+                                <label class="radio-label"><input type="radio" name="species" value="human" checked> Human</label>
+                                <label class="radio-label"><input type="radio" name="species" value="mouse"> Mouse</label>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>ID Type</label>
+                            <select id="id-type-select" class="select-input">
+                                <option value="auto">Auto-detect</option>
+                                <option value="ensembl">Ensembl (ENSG/ENSMUSG)</option>
+                                <option value="entrez">Entrez ID</option>
+                                <option value="refseq">RefSeq (NM_/NR_)</option>
+                                <option value="symbol">Gene Symbol</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="btn-map-genes">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>
+                        Map Genes
+                    </button>
+                </div>
+
+                <div class="mapping-result hidden" id="mapping-result">
+                    <div class="stats-row">
+                        <div class="stat-card glass-card">
+                            <div class="stat-value" id="mapped-count">0</div>
+                            <div class="stat-label">Mapped</div>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <div class="stat-value stat-warning" id="unmapped-count">0</div>
+                            <div class="stat-label">Unmapped</div>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <div class="stat-value" id="total-count">0</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-next" id="btn-to-normalize">
+                        Continue to Normalize
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Normalize Panel -->
+            <section class="panel" id="panel-normalize">
+                <div class="panel-header">
+                    <h1>Normalization</h1>
+                    <p class="panel-subtitle">Choose a normalization method for your count data</p>
+                </div>
+
+                <div class="method-cards">
+                    <div class="method-card glass-card selected" data-method="deseq2">
+                        <div class="method-icon">📊</div>
+                        <h3>DESeq2-like VST</h3>
+                        <p>Median-of-ratios normalization with variance-stabilizing transform. Best for differential analysis.</p>
+                        <span class="method-badge">Recommended</span>
+                    </div>
+                    <div class="method-card glass-card" data-method="tpm">
+                        <div class="method-icon">📈</div>
+                        <h3>CPM + Log2</h3>
+                        <p>Counts per million with log2 transform. Good for comparing expression levels across samples.</p>
+                    </div>
+                    <div class="method-card glass-card" data-method="log2">
+                        <div class="method-icon">📉</div>
+                        <h3>Log2(count+1)</h3>
+                        <p>Simple log2 transform. Fast and suitable for quick exploration.</p>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" id="btn-normalize">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    Normalize
+                </button>
+
+                <div class="norm-result hidden" id="norm-result">
+                    <div class="stats-row">
+                        <div class="stat-card glass-card">
+                            <div class="stat-value" id="norm-min">0</div>
+                            <div class="stat-label">Min</div>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <div class="stat-value" id="norm-median">0</div>
+                            <div class="stat-label">Median</div>
+                        </div>
+                        <div class="stat-card glass-card">
+                            <div class="stat-value" id="norm-max">0</div>
+                            <div class="stat-label">Max</div>
+                        </div>
+                    </div>
+                    <div class="glass-card" id="dist-plot-container">
+                        <h3>Distribution After Normalization</h3>
+                        <div id="dist-plot" style="width:100%;height:300px;"></div>
+                    </div>
+                    <button class="btn btn-primary btn-next" id="btn-to-groups">
+                        Continue to Groups
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Groups Panel -->
+            <section class="panel" id="panel-groups">
+                <div class="panel-header">
+                    <h1>Group Assignment</h1>
+                    <p class="panel-subtitle">Drag samples into groups for comparison. You need at least 2 groups for biomarker analysis.</p>
+                </div>
+
+                <div class="groups-layout">
+                    <div class="sample-pool glass-card">
+                        <div class="pool-header">
+                            <h3>Available Samples</h3>
+                            <span class="sample-count" id="pool-count">0</span>
+                        </div>
+                        <div class="pool-toolbar">
+                            <input type="text" class="pool-search" id="sample-search" placeholder="Filter samples...">
+                            <div class="pool-actions">
+                                <button class="btn btn-xs btn-outline" id="btn-select-all" title="Select all visible">Select All</button>
+                                <button class="btn btn-xs btn-outline" id="btn-deselect-all" title="Clear selection">Clear</button>
+                                <span class="selection-badge hidden" id="selection-count"></span>
+                            </div>
+                        </div>
+                        <div class="sample-list" id="sample-pool"></div>
+                        <div class="pool-hint">Click to select, Shift+click for range, Ctrl+click to toggle</div>
+                    </div>
+
+                    <div class="groups-area" id="groups-area">
+                        <!-- Groups will be dynamically added -->
+                    </div>
+                </div>
+
+                <div class="groups-actions">
+                    <button class="btn btn-outline" id="btn-add-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Add Group
+                    </button>
+                    <button class="btn btn-outline" id="btn-auto-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                        Auto-detect
+                    </button>
+                    <button class="btn btn-outline" id="btn-regex-group">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3v10"/><path d="M12.67 5.5H21"/><path d="M3 17l6 4V13l-6 4z"/></svg>
+                        Regex Group
+                    </button>
+                    <button class="btn btn-primary btn-next" id="btn-to-heatmap">
+                        Continue to Heatmap
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Heatmap Panel -->
+            <section class="panel" id="panel-heatmap">
+                <div class="panel-header">
+                    <h1>Heatmap</h1>
+                    <p class="panel-subtitle">Interactive clustered heatmap of expression data</p>
+                </div>
+
+                <div class="heatmap-controls glass-card">
+                    <div class="control-group">
+                        <label>Top Genes</label>
+                        <input type="range" id="topn-slider" min="50" max="2000" value="500" step="50">
+                        <span id="topn-value">500</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Distance</label>
+                        <select id="distance-select" class="select-input">
+                            <option value="correlation">Correlation</option>
+                            <option value="euclidean">Euclidean</option>
+                            <option value="cosine">Cosine</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Linkage</label>
+                        <select id="linkage-select" class="select-input">
+                            <option value="average">Average</option>
+                            <option value="ward">Ward</option>
+                            <option value="complete">Complete</option>
+                            <option value="single">Single</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Color Scale</label>
+                        <select id="colorscale-select" class="select-input">
+                            <option value="RdBu_r">Red-Blue</option>
+                            <option value="RdYlBu_r">Red-Yellow-Blue</option>
+                            <option value="Viridis">Viridis</option>
+                            <option value="Inferno">Inferno</option>
+                            <option value="Plasma">Plasma</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Clustering</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="cluster-rows" checked> Rows</label>
+                            <label class="checkbox-label"><input type="checkbox" id="cluster-cols" checked> Columns</label>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="btn-render-heatmap">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                        Render Heatmap
+                    </button>
+                </div>
+
+                <div class="heatmap-size-controls glass-card">
+                    <div class="control-group">
+                        <label>Width</label>
+                        <input type="range" id="heatmap-width-slider" min="0" max="2400" value="0" step="50">
+                        <span id="heatmap-width-value">Auto</span>
+                    </div>
+                    <div class="control-group">
+                        <label>Height</label>
+                        <input type="range" id="heatmap-height-slider" min="400" max="3000" value="800" step="50">
+                        <span id="heatmap-height-value">800px</span>
+                    </div>
+                </div>
+
+                <div class="heatmap-container glass-card" id="heatmap-wrapper">
+                    <div id="heatmap-plot" style="width:100%;min-height:500px;"></div>
+                </div>
+
+                <button class="btn btn-primary btn-next" id="btn-to-biomarker">
+                    Continue to Biomarker Analysis
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+            </section>
+
+            <!-- Biomarker Panel -->
+            <section class="panel" id="panel-biomarker">
+                <div class="panel-header">
+                    <h1>Biomarker Discovery</h1>
+                    <p class="panel-subtitle">Find group-discriminating genes using ML + SHAP analysis</p>
+                </div>
+
+                <div class="biomarker-controls glass-card">
+                    <div class="control-group">
+                        <label>ML Model</label>
+                        <select id="model-select" class="select-input">
+                            <option value="rf">Random Forest</option>
+                            <option value="xgboost">XGBoost</option>
+                            <option value="lightgbm">LightGBM</option>
+                            <option value="logistic_regression">Logistic Regression (L1)</option>
+                            <option value="svm_linear">SVM (Linear)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Top Genes</label>
+                        <input type="number" id="n-top-genes" class="number-input" value="20" min="5" max="100">
+                    </div>
+                    <div class="control-group" id="estimators-group">
+                        <label id="estimators-label">Trees</label>
+                        <input type="number" id="n-estimators" class="number-input" value="500" min="50" max="2000" step="50">
+                    </div>
+                    <div class="control-group">
+                        <label>CV Folds</label>
+                        <input type="number" id="cv-folds" class="number-input" value="5" min="2" max="10">
+                    </div>
+                    <button class="btn btn-primary btn-glow" id="btn-run-biomarker">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Run Biomarker Analysis
+                    </button>
+                </div>
+
+                <div class="progress-container hidden" id="biomarker-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <p class="progress-text" id="progress-text">Preparing...</p>
+                </div>
+
+                <div class="biomarker-results hidden" id="biomarker-results">
+                    <div class="results-grid">
+                        <div class="glass-card result-card">
+                            <h3>SHAP Feature Importance</h3>
+                            <div id="shap-plot" style="width:100%;height:500px;"></div>
+                        </div>
+                        <div class="glass-card result-card">
+                            <h3>ROC Curve</h3>
+                            <div id="auc-plot" style="width:100%;height:500px;"></div>
+                        </div>
+                    </div>
+                    <div class="glass-card result-card">
+                        <h3>Optimal Gene Combination (by AUC)</h3>
+                        <div class="optimal-combo-summary" id="optimal-combo-summary"></div>
+                        <div id="optimal-auc-curve" style="width:100%;height:350px;"></div>
+                        <div class="optimal-gene-list" id="optimal-gene-list"></div>
+                    </div>
+                    <div class="glass-card">
+                        <h3>Top Biomarker Genes</h3>
+                        <div class="accuracy-badge" id="accuracy-badge"></div>
+                        <div class="table-wrapper">
+                            <table id="biomarker-table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Gene</th>
+                                        <th>Importance</th>
+                                        <th>SHAP |value|</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="biomarker-actions">
+                        <button class="btn btn-primary" id="btn-shap-heatmap">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8" rx="1"/><rect x="12" y="6" width="3" height="12" rx="1"/><rect x="17" y="12" width="3" height="6" rx="1"/></svg>
+                            View SHAP Heatmap
+                        </button>
+                        <button class="btn btn-primary btn-next" id="btn-to-export">
+                            Continue to Export
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Export Panel -->
+            <section class="panel" id="panel-export">
+                <div class="panel-header">
+                    <h1>Export Results</h1>
+                    <p class="panel-subtitle">Download heatmaps, plots, and analysis results</p>
+                </div>
+
+                <div class="export-grid">
+                    <div class="export-card glass-card" data-type="heatmap_png">
+                        <div class="export-icon">🗺️</div>
+                        <h3>Heatmap</h3>
+                        <p>Clustered heatmap image</p>
+                        <div class="export-formats">
+                            <button class="btn btn-sm btn-outline" data-type="heatmap_png">PNG</button>
+                            <button class="btn btn-sm btn-outline" data-type="heatmap_svg">SVG</button>
+                        </div>
+                    </div>
+                    <div class="export-card glass-card" data-type="shap_png">
+                        <div class="export-icon">🎯</div>
+                        <h3>SHAP Plot</h3>
+                        <p>Feature importance chart</p>
+                        <div class="export-formats">
+                            <button class="btn btn-sm btn-outline" data-type="shap_png">PNG</button>
+                            <button class="btn btn-sm btn-outline" data-type="shap_svg">SVG</button>
+                        </div>
+                    </div>
+                    <div class="export-card glass-card" data-type="auc_png">
+                        <div class="export-icon">📈</div>
+                        <h3>ROC Curve</h3>
+                        <p>AUC performance plot</p>
+                        <div class="export-formats">
+                            <button class="btn btn-sm btn-outline" data-type="auc_png">PNG</button>
+                            <button class="btn btn-sm btn-outline" data-type="auc_svg">SVG</button>
+                        </div>
+                    </div>
+                    <div class="export-card glass-card" data-type="results_excel">
+                        <div class="export-icon">📋</div>
+                        <h3>Excel Report</h3>
+                        <p>All results in spreadsheet</p>
+                        <div class="export-formats">
+                            <button class="btn btn-sm btn-primary" data-type="results_excel">XLSX</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="export-settings glass-card">
+                    <div class="control-group">
+                        <label>Image DPI</label>
+                        <select id="export-dpi" class="select-input">
+                            <option value="150">150 DPI (Web)</option>
+                            <option value="300" selected>300 DPI (Print)</option>
+                            <option value="600">600 DPI (Publication)</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay hidden" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p class="loading-text" id="loading-text">Processing...</p>
+    </div>
+
+    <!-- Toast notifications -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/js/api.js?v=14"></script>
+    <script src="/static/js/upload.js?v=14"></script>
+    <script src="/static/js/heatmap.js?v=14"></script>
+    <script src="/static/js/groups.js?v=14"></script>
+    <script src="/static/js/biomarker.js?v=14"></script>
+    <script src="/static/js/export.js?v=14"></script>
+    <script src="/static/js/app.js?v=14"></script>
+</body>
+</html>
