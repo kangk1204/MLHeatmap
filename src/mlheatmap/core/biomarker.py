@@ -282,8 +282,8 @@ def run_biomarker_analysis(
 
     _progress("shap", 75, "SHAP aggregated across folds")
 
-    # 5. Top genes by averaged importance
-    top_idx = np.argsort(avg_importances)[-n_top_genes:][::-1]
+    # 5. Top genes by SHAP value (more interpretable than raw model importance)
+    top_idx = np.argsort(avg_shap_mean)[-n_top_genes:][::-1]
 
     # 6. Cross-validated AUC on top genes
     _progress("auc", 80, "Computing cross-validated AUC")

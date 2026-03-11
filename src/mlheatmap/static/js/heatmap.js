@@ -79,6 +79,12 @@ const Heatmap = {
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
 
+            // Restore header for regular heatmap
+            const header = document.querySelector('#panel-heatmap .panel-header h1');
+            const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
+            if (header) header.textContent = 'Heatmap';
+            if (subtitle) subtitle.textContent = 'Interactive clustered heatmap of expression data';
+
             this.plotHeatmap(data);
             App.markStepCompleted('heatmap');
         } catch (err) {
@@ -357,22 +363,33 @@ const Heatmap = {
     async renderShapHeatmap() {
         if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
 
+        const bioResults = App.state.biomarkerResults;
+        if (!bioResults) return App.showToast('Run biomarker analysis first', 'error');
+
+        // Use the number of top genes from biomarker results (capped at 100)
+        const nTopGenes = Math.min(bioResults.top_genes ? bioResults.top_genes.length : 20, 100);
+
         App.showLoading('Computing SHAP heatmap...');
         try {
-            const clusterRowsEl = document.getElementById('cluster-rows');
             const clusterColsEl = document.getElementById('cluster-cols');
             const data = await API.getShapHeatmap(App.state.sessionId, {
-                topN: parseInt(document.getElementById('topn-slider').value),
+                topN: nTopGenes,
                 distance: document.getElementById('distance-select').value,
                 linkage: document.getElementById('linkage-select').value,
                 colorScale: document.getElementById('colorscale-select').value,
-                clusterRows: clusterRowsEl ? clusterRowsEl.checked : false,
+                clusterRows: false,  // Keep SHAP rank order by default
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
 
+            // Update panel header to indicate SHAP mode
+            const header = document.querySelector('#panel-heatmap .panel-header h1');
+            const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
+            if (header) header.textContent = 'SHAP Heatmap';
+            if (subtitle) subtitle.textContent = `Top ${nTopGenes} biomarker genes ranked by SHAP importance — ${data.model || 'ML'} model`;
+
             this.plotShapHeatmap(data);
         } catch (err) {
-            App.showToast(err.message, 'error');
+            App.showToast('SHAP heatmap failed: ' + err.message, 'error');
         } finally {
             App.hideLoading();
         }
