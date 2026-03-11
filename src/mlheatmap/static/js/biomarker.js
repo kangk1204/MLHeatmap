@@ -2,7 +2,10 @@
 const Biomarker = {
     init() {
         document.getElementById('btn-run-biomarker').addEventListener('click', () => this.run());
-        document.getElementById('btn-to-export').addEventListener('click', () => App.goToPanel('export'));
+        document.getElementById('btn-to-export').addEventListener('click', () => {
+            App.goToPanel('heatmap');
+            Heatmap.renderShapHeatmap();
+        });
 
         // Model-specific parameter visibility
         const modelSelect = document.getElementById('model-select');

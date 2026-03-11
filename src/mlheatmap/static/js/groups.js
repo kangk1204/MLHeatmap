@@ -438,10 +438,7 @@ const Groups = {
             await API.setGroups(App.state.sessionId, groups);
             App.state.groups = groups;
             App.markStepCompleted('groups');
-            App.goToPanel('heatmap');
-
-            // Auto-render heatmap
-            setTimeout(() => Heatmap.render(), 300);
+            App.goToPanel('biomarker');
         } catch (err) {
             App.showToast(err.message, 'error');
         } finally {
