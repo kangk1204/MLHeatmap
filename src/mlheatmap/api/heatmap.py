@@ -117,7 +117,10 @@ async def get_shap_heatmap(
     response = dict(result)
     response["groups"] = session.groups
     response["color_scale"] = color_scale
-    response["shap_values"] = found_shap  # SHAP values aligned with y (genes)
     response["model"] = session.biomarker_results.get("model", "Random Forest")
+
+    # Reorder SHAP values to match clustered y order
+    shap_map = dict(zip(found_symbols, found_shap))
+    response["shap_values"] = [shap_map.get(gene, 0) for gene in result["y"]]
 
     return response
