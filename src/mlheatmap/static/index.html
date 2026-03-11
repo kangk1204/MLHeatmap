@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/css/main.css?v=28">
+    <link rel="stylesheet" href="/static/css/main.css?v=30">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
 </head>
 <body>
@@ -334,10 +334,17 @@
             <section class="panel" id="panel-biomarker">
                 <div class="panel-header">
                     <h1>Biomarker Discovery</h1>
-                    <p class="panel-subtitle">Find group-discriminating genes using ML + SHAP analysis</p>
+                    <p class="panel-subtitle">Find group-discriminating genes using ML + SHAP analysis or DEG</p>
                 </div>
 
-                <div class="biomarker-controls glass-card">
+                <!-- Method Tabs -->
+                <div class="biomarker-tabs">
+                    <button class="bio-tab active" data-tab="ml">ML / SHAP</button>
+                    <button class="bio-tab" data-tab="deg">DEG / Statistical</button>
+                </div>
+
+                <!-- ML/SHAP Controls -->
+                <div class="biomarker-controls glass-card" id="ml-controls">
                     <div class="control-group">
                         <label>ML Model</label>
                         <select id="model-select" class="select-input">
@@ -374,6 +381,29 @@
                         Run Biomarker Analysis
                     </button>
                     <div class="model-warning hidden" id="model-warning"></div>
+                </div>
+
+                <!-- DEG Controls -->
+                <div class="biomarker-controls glass-card hidden" id="deg-controls">
+                    <div class="control-group">
+                        <label>Statistical Test</label>
+                        <select id="deg-method-select" class="select-input">
+                            <option value="wilcoxon">Wilcoxon Rank-Sum</option>
+                            <option value="ttest">Welch's t-test</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>|log2FC| Threshold</label>
+                        <input type="number" id="deg-fc-threshold" class="number-input" value="1.0" min="0" max="5" step="0.25">
+                    </div>
+                    <div class="control-group">
+                        <label>FDR Threshold</label>
+                        <input type="number" id="deg-pval-threshold" class="number-input" value="0.05" min="0.001" max="0.5" step="0.01">
+                    </div>
+                    <button class="btn btn-primary btn-glow" id="btn-run-deg">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Run DEG Analysis
+                    </button>
                 </div>
 
                 <div class="progress-container hidden" id="biomarker-progress">
@@ -421,6 +451,45 @@
                     <div class="biomarker-actions">
                         <button class="btn btn-primary btn-next" id="btn-to-export">
                             Continue to Heatmap
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- DEG Results -->
+                <div class="biomarker-results hidden" id="deg-results">
+                    <div class="results-grid">
+                        <div class="glass-card result-card">
+                            <h3>Volcano Plot</h3>
+                            <div id="volcano-plot" style="width:100%;height:500px;"></div>
+                        </div>
+                        <div class="glass-card result-card">
+                            <h3>DEG Summary</h3>
+                            <div class="deg-summary" id="deg-summary"></div>
+                            <div id="deg-bar-plot" style="width:100%;height:300px;"></div>
+                        </div>
+                    </div>
+                    <div class="glass-card">
+                        <h3>Differentially Expressed Genes</h3>
+                        <div class="table-wrapper">
+                            <table id="deg-table">
+                                <thead>
+                                    <tr>
+                                        <th>Rank</th>
+                                        <th>Gene</th>
+                                        <th>log2FC</th>
+                                        <th>P-value</th>
+                                        <th>FDR</th>
+                                        <th>Direction</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="biomarker-actions">
+                        <button class="btn btn-primary btn-next" id="btn-deg-to-heatmap">
+                            View DEG Heatmap
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                         </button>
                     </div>
@@ -571,12 +640,12 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/js/api.js?v=28"></script>
-    <script src="/static/js/upload.js?v=28"></script>
-    <script src="/static/js/heatmap.js?v=28"></script>
-    <script src="/static/js/groups.js?v=28"></script>
-    <script src="/static/js/biomarker.js?v=28"></script>
-    <script src="/static/js/export.js?v=28"></script>
-    <script src="/static/js/app.js?v=28"></script>
+    <script src="/static/js/api.js?v=30"></script>
+    <script src="/static/js/upload.js?v=30"></script>
+    <script src="/static/js/heatmap.js?v=30"></script>
+    <script src="/static/js/groups.js?v=30"></script>
+    <script src="/static/js/biomarker.js?v=30"></script>
+    <script src="/static/js/export.js?v=30"></script>
+    <script src="/static/js/app.js?v=30"></script>
 </body>
 </html>

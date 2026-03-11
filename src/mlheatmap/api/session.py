@@ -23,6 +23,7 @@ class Session:
     species: str = "unknown"
     id_type: str = "unknown"
     biomarker_results: Optional[dict] = None
+    deg_results: Optional[dict] = None
     heatmap_data: Optional[dict] = None
     created_at: float = field(default_factory=time.time)
 
