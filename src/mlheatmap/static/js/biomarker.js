@@ -130,8 +130,10 @@ const Biomarker = {
     },
 
     plotShap(data) {
-        const genes = data.top_genes.map(g => g.symbol).reverse();
-        const values = data.top_genes.map(g => g.shap_mean_abs).reverse();
+        // Sort by SHAP value (ascending for horizontal bar — largest at top)
+        const sorted = [...data.top_genes].sort((a, b) => a.shap_mean_abs - b.shap_mean_abs);
+        const genes = sorted.map(g => g.symbol);
+        const values = sorted.map(g => g.shap_mean_abs);
 
         const maxVal = Math.max(...values);
         const colors = values.map(v => {
@@ -328,7 +330,11 @@ const Biomarker = {
         const tbody = document.querySelector('#biomarker-table tbody');
         tbody.innerHTML = '';
 
-        topGenes.forEach(gene => {
+        // Sort by SHAP value (descending) and re-rank
+        const sorted = [...topGenes].sort((a, b) => b.shap_mean_abs - a.shap_mean_abs);
+        sorted.forEach((gene, i) => { gene.rank = i + 1; });
+
+        sorted.forEach(gene => {
             const tr = document.createElement('tr');
 
             const tdRank = document.createElement('td');
