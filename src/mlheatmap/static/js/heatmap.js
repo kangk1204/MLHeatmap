@@ -386,7 +386,7 @@ const Heatmap = {
             const header = document.querySelector('#panel-heatmap .panel-header h1');
             const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
             if (header) header.textContent = 'SHAP Heatmap';
-            if (subtitle) subtitle.textContent = `Top ${nTopGenes} biomarker genes ranked by SHAP importance — ${data.model || 'ML'} model`;
+            if (subtitle) subtitle.textContent = `Top ${nTopGenes} genes by ML feature importance (SHAP). Unlike DEG heatmaps, group separation is not guaranteed.`;
 
             this.plotShapHeatmap(data);
         } catch (err) {
@@ -460,9 +460,12 @@ const Heatmap = {
             colorbar: {
                 title: { text: 'Z-score', font: { color: '#e2e8f0', size: 10 } },
                 tickfont: { color: '#94a3b8', size: 9 },
-                thickness: 10, len: 0.3, y: 0.15, x: xHeatmap[1] + 0.005,
+                thickness: 10, len: 0.25,
+                y: -0.02, yanchor: 'top',
+                x: xHeatmap[0] + 0.01, xanchor: 'left',
+                orientation: 'h',
                 outlinewidth: 0,
-                tickvals: [-3, -1, 0, 1, 3],
+                tickvals: [-3, 0, 3],
             },
         });
 
@@ -584,7 +587,7 @@ const Heatmap = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: leftMargin, r: 60, t: hasGroups ? 40 : 25, b: 10 },
+            margin: { l: leftMargin, r: 60, t: hasGroups ? 40 : 25, b: 60 },
 
             xaxis: {
                 domain: xHeatmap,
