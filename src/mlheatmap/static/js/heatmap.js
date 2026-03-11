@@ -51,15 +51,17 @@ const Heatmap = {
         const widthSlider = document.getElementById('heatmap-width-slider');
         const heightSlider = document.getElementById('heatmap-height-slider');
 
-        const newWidth = widthSlider && parseInt(widthSlider.value) > 0 ? parseInt(widthSlider.value) : null;
-        const newHeight = heightSlider ? parseInt(heightSlider.value) : null;
+        const wVal = widthSlider ? parseInt(widthSlider.value) : 0;
+        const hVal = heightSlider ? parseInt(heightSlider.value) : 800;
 
-        const update = {};
-        if (newWidth) update.width = newWidth;
-        else update.width = null;  // auto
-        if (newHeight) update.height = newHeight;
+        // For auto width, use the container's actual width
+        const containerWidth = plotEl.parentElement ? plotEl.parentElement.clientWidth : 0;
+        const newWidth = wVal > 0 ? wVal : (containerWidth > 0 ? containerWidth : undefined);
 
-        Plotly.relayout(plotEl, update);
+        Plotly.relayout(plotEl, {
+            width: newWidth,
+            height: hVal,
+        });
     },
 
     async render() {
