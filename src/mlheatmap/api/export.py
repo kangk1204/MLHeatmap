@@ -23,6 +23,7 @@ async def export_data(
         export_heatmap_image,
         export_results_excel,
         export_shap_image,
+        export_volcano_image,
     )
 
     try:
@@ -50,6 +51,14 @@ async def export_data(
             data = export_auc_image(session, fmt="svg", dpi=dpi)
             return Response(data, media_type="image/svg+xml",
                           headers={"Content-Disposition": "attachment; filename=auc.svg"})
+        elif export_type == "volcano_png":
+            data = export_volcano_image(session, fmt="png", dpi=dpi)
+            return Response(data, media_type="image/png",
+                          headers={"Content-Disposition": "attachment; filename=volcano_plot.png"})
+        elif export_type == "volcano_svg":
+            data = export_volcano_image(session, fmt="svg", dpi=dpi)
+            return Response(data, media_type="image/svg+xml",
+                          headers={"Content-Disposition": "attachment; filename=volcano_plot.svg"})
         elif export_type == "results_excel":
             data = export_results_excel(session)
             return Response(data,
