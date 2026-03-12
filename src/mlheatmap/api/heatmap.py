@@ -1,11 +1,43 @@
 """Heatmap API endpoints."""
 
 import asyncio
+import numpy as np
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 router = APIRouter(tags=["heatmap"])
+
+
+def _order_samples_by_groups(
+    expression: np.ndarray,
+    sample_names: list[str],
+    groups: dict,
+    cluster_cols: bool,
+) -> tuple[np.ndarray, list[str]]:
+    """Keep samples grouped when column clustering is disabled.
+
+    The group order follows the current group-definition order from the UI.
+    Samples not assigned to any group are appended at the end in their
+    original order.
+    """
+    if cluster_cols or expression.shape[1] <= 1 or not groups:
+        return expression, sample_names
+
+    name_to_idx = {name: i for i, name in enumerate(sample_names)}
+    ordered_indices = []
+    seen = set()
+
+    for group_samples in groups.values():
+        for sample in group_samples:
+            idx = name_to_idx.get(sample)
+            if idx is not None and idx not in seen:
+                ordered_indices.append(idx)
+                seen.add(idx)
+
+    ordered_indices.extend(i for i in range(len(sample_names)) if i not in seen)
+
+    return expression[:, ordered_indices], [sample_names[i] for i in ordered_indices]
 
 
 @router.get("/heatmap")
@@ -20,7 +52,6 @@ async def get_heatmap(
     cluster_cols: bool = Query(True),
 ):
     """Compute clustered heatmap data."""
-    import numpy as np
     from mlheatmap.core.clustering import compute_heatmap_data
 
     session = request.app.state.sessions.get(session_id)
@@ -34,6 +65,9 @@ async def get_heatmap(
     ]
     expression = session.normalized[:, sample_mask]
     sample_names = [session.sample_names[i] for i in sample_mask]
+    expression, sample_names = _order_samples_by_groups(
+        expression, sample_names, session.groups, cluster_cols
+    )
 
     result = compute_heatmap_data(
         expression=expression,
@@ -84,6 +118,9 @@ async def render_heatmap(
     ]
     expression = session.normalized[:, sample_mask]
     sample_names = [session.sample_names[i] for i in sample_mask]
+    expression, sample_names = _order_samples_by_groups(
+        expression, sample_names, session.groups, cluster_cols
+    )
 
     session.heatmap_color_scale = color_scale
 
@@ -122,7 +159,6 @@ async def get_shap_heatmap(
     cluster_cols: bool = Query(True),
 ):
     """Compute heatmap using SHAP-ranked top genes from biomarker results."""
-    import numpy as np
     from mlheatmap.core.clustering import compute_heatmap_data
 
     session = request.app.state.sessions.get(session_id)
@@ -158,6 +194,9 @@ async def get_shap_heatmap(
     ]
     expression = session.normalized[np.array(gene_indices)][:, sample_mask]
     sample_names = [session.sample_names[i] for i in sample_mask]
+    expression, sample_names = _order_samples_by_groups(
+        expression, sample_names, session.groups, cluster_cols
+    )
 
     result = compute_heatmap_data(
         expression=expression,
@@ -196,7 +235,6 @@ async def get_deg_heatmap(
     cluster_cols: bool = Query(True),
 ):
     """Compute heatmap using DEG-ranked top genes."""
-    import numpy as np
     from mlheatmap.core.clustering import compute_heatmap_data
 
     session = request.app.state.sessions.get(session_id)
@@ -235,6 +273,9 @@ async def get_deg_heatmap(
     ]
     expression = session.normalized[np.array(gene_indices)][:, sample_mask]
     sample_names = [session.sample_names[i] for i in sample_mask]
+    expression, sample_names = _order_samples_by_groups(
+        expression, sample_names, session.groups, cluster_cols
+    )
 
     result = compute_heatmap_data(
         expression=expression,
