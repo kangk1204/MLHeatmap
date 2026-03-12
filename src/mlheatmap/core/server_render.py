@@ -132,9 +132,9 @@ def render_heatmap_image(
     # Sample labels
     sample_fontsize = max(5, min(11, 500 / n_samples))
 
-    # Dendrogram ratio
-    dendro_row_ratio = 0.08 if do_row_cluster else 0
-    dendro_col_ratio = 0.06 if do_col_cluster else 0
+    # Dendrogram ratio (use tiny non-zero to avoid seaborn empty bboxes bug)
+    dendro_row_ratio = 0.08 if do_row_cluster else 0.001
+    dendro_col_ratio = 0.06 if do_col_cluster else 0.001
 
     try:
         # Set dark theme
