@@ -508,20 +508,20 @@ const Biomarker = {
         const down = results.filter(r => r.direction === 'down');
         const ns = results.filter(r => r.direction === 'ns');
 
-        const makeTrace = (subset, name, color) => ({
+        const makeTrace = (subset, name, color, size, opacity) => ({
             x: subset.map(r => r.log2fc),
             y: subset.map(r => r.neg_log10_p),
             text: subset.map(r => r.gene),
             mode: 'markers',
             name: `${name} (${subset.length})`,
-            marker: { color, size: 5, opacity: 0.7 },
+            marker: { color, size, opacity },
             hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{y:.2f}<extra></extra>`,
         });
 
         const traces = [
-            makeTrace(ns, 'NS', '#475569'),
-            makeTrace(up, 'Up', '#ef4444'),
-            makeTrace(down, 'Down', '#3b82f6'),
+            makeTrace(ns, 'NS', '#64748b', 3, 0.35),
+            makeTrace(up, 'Up', '#ef4444', 6, 0.8),
+            makeTrace(down, 'Down', '#3b82f6', 6, 0.8),
         ];
 
         // Top gene labels
