@@ -125,6 +125,136 @@ def export_auc_image(session, fmt="png", dpi=300) -> bytes:
     return fig.to_image(format="png", scale=dpi / 100)
 
 
+def export_volcano_image(session, fmt="png", dpi=300) -> bytes:
+    """Export Volcano plot as publication-quality figure using matplotlib."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    deg = session.deg_results
+    if not deg or "results" not in deg:
+        raise ValueError("No DEG results. Run DEG analysis first.")
+
+    results = deg["results"]
+    thresholds = deg["thresholds"]
+    fc_thresh = thresholds["log2fc"]
+    p_thresh = thresholds["pvalue"]
+    neg_log10_thresh = -np.log10(p_thresh) if p_thresh > 0 else 2
+    pvalue_type = deg.get("pvalue_type", "fdr")
+    p_label = "P-value" if pvalue_type == "raw" else "FDR"
+
+    # Separate by direction
+    up = [r for r in results if r["direction"] == "up"]
+    down = [r for r in results if r["direction"] == "down"]
+    ns = [r for r in results if r["direction"] == "ns"]
+
+    # Dark theme matching the app
+    BG = "#06060b"
+    BG_CARD = "#0f1117"
+    TEXT = "#e2e8f0"
+    TEXT_SEC = "#94a3b8"
+    GRID = "#1e293b"
+
+    fig, ax = plt.subplots(figsize=(9, 7), facecolor=BG)
+    ax.set_facecolor(BG_CARD)
+
+    # NS points (small gray)
+    if ns:
+        ax.scatter(
+            [r["log2fc"] for r in ns],
+            [r["neg_log10_p"] for r in ns],
+            s=6, c="#4b5563", alpha=0.35, edgecolors="none",
+            label=f"NS ({len(ns):,})", rasterized=True, zorder=1,
+        )
+    # Down points (blue)
+    if down:
+        ax.scatter(
+            [r["log2fc"] for r in down],
+            [r["neg_log10_p"] for r in down],
+            s=30, c="#3b82f6", alpha=0.8, edgecolors="none",
+            label=f"Down ({len(down)})", zorder=2,
+        )
+    # Up points (red)
+    if up:
+        ax.scatter(
+            [r["log2fc"] for r in up],
+            [r["neg_log10_p"] for r in up],
+            s=30, c="#ef4444", alpha=0.8, edgecolors="none",
+            label=f"Up ({len(up)})", zorder=2,
+        )
+
+    # Top gene labels (up to 5 per direction, spread vertically to reduce overlap)
+    top_up = sorted(
+        up,
+        key=lambda r: r["pvalue"] if pvalue_type == "raw" else r.get("adj_pvalue", r["pvalue"]),
+    )[:5]
+    top_down = sorted(
+        down,
+        key=lambda r: r["pvalue"] if pvalue_type == "raw" else r.get("adj_pvalue", r["pvalue"]),
+    )[:5]
+    label_genes = top_up + top_down
+    offsets_y = [8, 20, 32, 44, 56, 8, 20, 32, 44, 56]  # stagger vertically
+    for i, r in enumerate(label_genes):
+        ax.annotate(
+            r["gene"],
+            (r["log2fc"], r["neg_log10_p"]),
+            fontsize=7.5, color=TEXT, alpha=0.9, fontweight="500",
+            textcoords="offset points", xytext=(0, offsets_y[i % len(offsets_y)]),
+            ha="center", va="bottom",
+            arrowprops=dict(arrowstyle="-", color=TEXT_SEC, alpha=0.4, lw=0.5),
+        )
+
+    # Threshold lines
+    all_fc = [r["log2fc"] for r in results]
+    max_fc = max(abs(min(all_fc)), abs(max(all_fc)), fc_thresh + 0.5) if all_fc else 3
+    ax.axvline(fc_thresh, color="#475569", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(-fc_thresh, color="#475569", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axhline(neg_log10_thresh, color="#475569", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    # Styling
+    ax.set_xlabel("log₂ Fold Change", fontsize=12, color=TEXT_SEC, labelpad=8)
+    ax.set_ylabel(f"-log₁₀({p_label})", fontsize=12, color=TEXT_SEC, labelpad=8)
+    ax.set_xlim(-max_fc * 1.15, max_fc * 1.15)
+    ax.tick_params(colors=TEXT_SEC, labelsize=9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_color(GRID)
+    ax.spines["left"].set_color(GRID)
+    ax.set_axisbelow(True)
+    ax.grid(True, alpha=0.15, color=GRID)
+
+    legend = ax.legend(
+        loc="upper left", fontsize=9, frameon=True,
+        facecolor=BG_CARD, edgecolor=GRID, labelcolor=TEXT,
+    )
+    legend.get_frame().set_alpha(0.9)
+
+    n_total = len(results)
+    n_sig = len(up) + len(down)
+    method = deg.get("method", "wilcoxon")
+    method_label = "Wilcoxon" if method == "wilcoxon" else "Welch's t-test"
+    fig.suptitle(
+        f"Volcano Plot — {n_sig:,} DEGs / {n_total:,} genes ({method_label})",
+        fontsize=14, color=TEXT, y=1.02, fontweight="500",
+    )
+    fig.text(
+        0.99, 0.01,
+        f"|log₂FC| > {fc_thresh}  &  {p_label} < {p_thresh}",
+        fontsize=8, color=TEXT_SEC, alpha=0.7, ha="right",
+        transform=fig.transFigure,
+    )
+
+    buf = io.BytesIO()
+    fig.savefig(
+        buf, format=fmt, dpi=dpi, bbox_inches="tight",
+        facecolor=BG, edgecolor="none", pad_inches=0.2,
+    )
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 def export_results_excel(session) -> bytes:
     """Export all results to Excel."""
     import pandas as pd
@@ -147,7 +277,18 @@ def export_results_excel(session) -> bytes:
             genes_df = pd.DataFrame(session.biomarker_results["top_genes"])
             genes_df.to_excel(writer, sheet_name="Biomarker Genes", index=False)
 
-        # Sheet 3: Group assignments
+        # Sheet 3: DEG results
+        if hasattr(session, "deg_results") and session.deg_results:
+            deg_data = session.deg_results["results"]
+            deg_df = pd.DataFrame(deg_data)
+            # Reorder columns for clarity
+            col_order = ["gene", "log2fc", "pvalue", "adj_pvalue", "direction",
+                         "mean_g1", "mean_g2", "neg_log10_p", "gene_idx"]
+            col_order = [c for c in col_order if c in deg_df.columns]
+            deg_df = deg_df[col_order]
+            deg_df.to_excel(writer, sheet_name="DEG Results", index=False)
+
+        # Sheet 4: Group assignments
         if session.groups:
             rows = []
             for group, samples in session.groups.items():
