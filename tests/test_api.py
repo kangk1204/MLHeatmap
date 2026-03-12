@@ -262,6 +262,23 @@ class TestHeatmap:
         r = client.get("/api/v1/heatmap?session_id=nonexistent&top_n=50")
         assert r.status_code == 404
 
+    def test_heatmap_without_column_clustering_groups_samples(self, client):
+        sid, samples, _ = _prepare_deg_session(client)
+        interleaved_groups = {
+            "Group A": [samples[0], samples[2], samples[4]],
+            "Group B": [samples[1], samples[3], samples[5]],
+        }
+        r = client.post("/api/v1/groups", json={
+            "session_id": sid,
+            "groups": interleaved_groups,
+        })
+        assert r.status_code == 200
+
+        r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20&cluster_cols=false")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["x"] == interleaved_groups["Group A"] + interleaved_groups["Group B"]
+
 
 class TestDEG:
     def test_deg_reference_group_reorders_labels(self, client):
