@@ -57,6 +57,10 @@ def compute_deg(
         expr_g1 = expression[i, idx_g1]
         expr_g2 = expression[i, idx_g2]
 
+        # Replace non-finite values (from log2(0) = -inf, etc.)
+        expr_g1 = np.nan_to_num(expr_g1, nan=0.0, posinf=0.0, neginf=0.0)
+        expr_g2 = np.nan_to_num(expr_g2, nan=0.0, posinf=0.0, neginf=0.0)
+
         # Mean expression per group
         mean_g1 = float(np.mean(expr_g1))
         mean_g2 = float(np.mean(expr_g2))
@@ -65,6 +69,8 @@ def compute_deg(
         # If data is already log-transformed, difference = log2FC
         # If not, compute from raw means with pseudocount
         log2fc = mean_g1 - mean_g2
+        if not np.isfinite(log2fc):
+            log2fc = 0.0
 
         # Statistical test
         pval = 1.0
@@ -73,12 +79,14 @@ def compute_deg(
                 _, pval = stats.mannwhitneyu(
                     expr_g1, expr_g2, alternative="two-sided"
                 )
+                if not np.isfinite(pval):
+                    pval = 1.0
             except ValueError:
                 pval = 1.0
         elif method == "ttest":
             try:
                 _, pval = stats.ttest_ind(expr_g1, expr_g2, equal_var=False)
-                if np.isnan(pval):
+                if not np.isfinite(pval):
                     pval = 1.0
             except Exception:
                 pval = 1.0

@@ -519,9 +519,9 @@ const Biomarker = {
         });
 
         const traces = [
-            makeTrace(ns, 'NS', '#64748b', 3, 0.35),
-            makeTrace(up, 'Up', '#ef4444', 6, 0.8),
-            makeTrace(down, 'Down', '#3b82f6', 6, 0.8),
+            makeTrace(ns, 'NS', '#6b7280', 4, 0.45),
+            makeTrace(up, 'Up', '#ef4444', 7, 0.85),
+            makeTrace(down, 'Down', '#3b82f6', 7, 0.85),
         ];
 
         // Top gene labels
