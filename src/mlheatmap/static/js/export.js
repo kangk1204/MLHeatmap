@@ -6,9 +6,39 @@ const Export = {
         });
     },
 
+    /** Show / hide export cards based on which analyses have been run. */
+    refresh() {
+        const hasDeg  = !!App.state.degResults;
+        const hasMl   = !!App.state.biomarkerResults;
+
+        // Volcano — requires DEG
+        const volcanoCard = document.querySelector('.export-card[data-type="volcano_png"]');
+        if (volcanoCard) volcanoCard.style.display = hasDeg ? '' : 'none';
+
+        // SHAP — requires ML
+        const shapCard = document.querySelector('.export-card[data-type="shap_png"]');
+        if (shapCard) shapCard.style.display = hasMl ? '' : 'none';
+
+        // ROC — requires ML
+        const aucCard = document.querySelector('.export-card[data-type="auc_png"]');
+        if (aucCard) aucCard.style.display = hasMl ? '' : 'none';
+    },
+
     download(type) {
         if (!App.state.sessionId) {
             App.showToast('No data loaded', 'error');
+            return;
+        }
+
+        // Guard: block exports for data that doesn't exist
+        const needsDeg = type.startsWith('volcano_');
+        const needsMl  = type.startsWith('shap_') || type.startsWith('auc_');
+        if (needsDeg && !App.state.degResults) {
+            App.showToast('Run DEG analysis first', 'error');
+            return;
+        }
+        if (needsMl && !App.state.biomarkerResults) {
+            App.showToast('Run biomarker analysis first', 'error');
             return;
         }
 

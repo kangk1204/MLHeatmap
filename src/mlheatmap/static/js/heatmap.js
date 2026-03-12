@@ -3,6 +3,8 @@ const Heatmap = {
     _isShapMode: false,
     _isDegMode: false,
     _serverImageUrl: null,  // Track blob URL for cleanup
+    _maxGenes: 60000,  // Updated after normalization
+    _activeMax: 60000, // Current mode's effective max (changes per mode)
     SERVER_RENDER_THRESHOLD: 5000,
     GROUP_COLORS: ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
                    '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
@@ -13,28 +15,70 @@ const Heatmap = {
         return div.innerHTML;
     },
 
+    /** Consolidate dendrogram branches into a single trace using null separators. */
+    _buildDendroTrace(dendroData, {type, xaxis, yaxis}) {
+        const { icoord, dcoord } = dendroData;
+        const allX = [];
+        const allY = [];
+        for (let i = 0; i < icoord.length; i++) {
+            if (type === 'col') {
+                // Column dendrogram: x = mapped icoord, y = raw dcoord
+                for (let j = 0; j < icoord[i].length; j++) allX.push((icoord[i][j] - 5) / 10);
+                allY.push(...dcoord[i]);
+            } else {
+                // Row dendrogram: x = -dcoord, y = mapped icoord
+                for (let j = 0; j < dcoord[i].length; j++) allX.push(-dcoord[i][j]);
+                for (let j = 0; j < icoord[i].length; j++) allY.push((icoord[i][j] - 5) / 10);
+            }
+            allX.push(null);
+            allY.push(null);
+        }
+        return {
+            x: allX, y: allY,
+            mode: 'lines', line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
+            xaxis, yaxis, showlegend: false, hoverinfo: 'skip',
+        };
+    },
+
+    _getTopNStep(val) {
+        if (this._isShapMode) return 1;
+        if (this._isDegMode) return 5;
+        if (val > 10000) return 1000;
+        if (val > 5000) return 500;
+        if (val > 1000) return 100;
+        if (val > 200) return 25;
+        return 1;
+    },
+
     init() {
         const slider = document.getElementById('topn-slider');
-        const label = document.getElementById('topn-value');
-        slider.addEventListener('input', () => {
-            const val = parseInt(slider.value);
-            label.textContent = val >= 1000 ? (val / 1000).toFixed(val % 1000 === 0 ? 0 : 1) + 'K' : val;
+        const topnInput = document.getElementById('topn-input');
 
-            // Adaptive step size
-            if (val > 10000) slider.step = 1000;
-            else if (val > 5000) slider.step = 500;
-            else slider.step = 50;
+        const syncTopN = (val) => {
+            const effectiveMax = this._activeMax || this._maxGenes || 60000;
+            const clamped = Math.max(10, Math.min(effectiveMax, val));
+            slider.step = this._getTopNStep(clamped);
+            slider.value = clamped;
+            topnInput.value = clamped;
 
             // Render mode badge
             const badge = document.getElementById('render-mode-badge');
             if (badge) {
-                if (val > this.SERVER_RENDER_THRESHOLD) {
+                if (!this._isShapMode && !this._isDegMode && clamped > this.SERVER_RENDER_THRESHOLD) {
                     badge.textContent = 'Server Render';
                     badge.style.display = 'inline-block';
                 } else {
                     badge.style.display = 'none';
                 }
             }
+        };
+
+        slider.addEventListener('input', () => {
+            syncTopN(parseInt(slider.value, 10) || 10);
+        });
+
+        topnInput.addEventListener('change', () => {
+            syncTopN(parseInt(topnInput.value, 10) || 10);
         });
 
         document.getElementById('btn-render-heatmap').addEventListener('click', () => {
@@ -68,6 +112,26 @@ const Heatmap = {
         }
     },
 
+    updateTopNMax(totalGenes) {
+        const safeMax = Math.max(totalGenes, 10);
+        this._maxGenes = safeMax;
+        this._activeMax = safeMax;
+        const slider = document.getElementById('topn-slider');
+        const topnInput = document.getElementById('topn-input');
+        if (slider) {
+            slider.max = safeMax;
+            slider.step = this._getTopNStep(parseInt(slider.value, 10) || 10);
+        }
+        if (topnInput) topnInput.max = safeMax;
+        // Clamp current values if needed
+        if (slider && parseInt(slider.value, 10) > safeMax) {
+            slider.value = safeMax;
+        }
+        if (topnInput && parseInt(topnInput.value, 10) > safeMax) {
+            topnInput.value = safeMax;
+        }
+    },
+
     _resizePlot() {
         // Skip if showing server-rendered image
         if (document.getElementById('server-heatmap-viewer')) return;
@@ -95,7 +159,19 @@ const Heatmap = {
         this._isShapMode = false;
         this._isDegMode = false;
 
-        const topN = parseInt(document.getElementById('topn-slider').value);
+        // Restore slider to full gene range
+        if (this._maxGenes) {
+            this._activeMax = this._maxGenes;
+            const slider = document.getElementById('topn-slider');
+            const topnInput = document.getElementById('topn-input');
+            if (slider) {
+                slider.max = this._maxGenes;
+                slider.step = this._getTopNStep(parseInt(topnInput?.value || slider.value || '10', 10));
+            }
+            if (topnInput) topnInput.max = this._maxGenes;
+        }
+
+        const topN = parseInt(document.getElementById('topn-input').value || document.getElementById('topn-slider').value, 10);
 
         // Auto-switch to server-side rendering for large gene sets
         if (topN > this.SERVER_RENDER_THRESHOLD) {
@@ -326,38 +402,17 @@ const Heatmap = {
         });
 
         // =============================================
-        // 2. COLUMN DENDROGRAM (top)
-        // scipy dendrogram leaf positions: 5, 15, 25... = 10*i + 5
+        // 2. COLUMN DENDROGRAM (top) — single consolidated trace
         // =============================================
         if (hasColDendro) {
-            const { icoord, dcoord } = col_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: icoord[i].map(v => (v - 5) / 10),
-                    y: dcoord[i],
-                    mode: 'lines',
-                    line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x', yaxis: 'y2',
-                    showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(col_dendrogram, {type: 'col', xaxis: 'x', yaxis: 'y2'}));
         }
 
         // =============================================
-        // 3. ROW DENDROGRAM (left of gene names)
+        // 3. ROW DENDROGRAM (left of gene names) — single consolidated trace
         // =============================================
         if (hasRowDendro) {
-            const { icoord, dcoord } = row_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: dcoord[i].map(v => -v),
-                    y: icoord[i].map(v => (v - 5) / 10),
-                    mode: 'lines',
-                    line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x3', yaxis: 'y6',
-                    showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(row_dendrogram, {type: 'row', xaxis: 'x3', yaxis: 'y6'}));
         }
 
         // =============================================
@@ -537,11 +592,20 @@ const Heatmap = {
         const bioResults = App.state.biomarkerResults;
         if (!bioResults) return App.showToast('Run biomarker analysis first', 'error');
         this._isShapMode = true;
+        this._isDegMode = false;
 
-        // Use slider value if within SHAP range, otherwise use biomarker results count
+        // Clamp slider to SHAP gene range
         const maxShapGenes = bioResults.top_genes ? bioResults.top_genes.length : 20;
-        const sliderVal = parseInt(document.getElementById('topn-slider').value);
-        const nTopGenes = Math.min(sliderVal <= 100 ? sliderVal : maxShapGenes, maxShapGenes);
+        this._activeMax = maxShapGenes;
+        const slider = document.getElementById('topn-slider');
+        const topnInput = document.getElementById('topn-input');
+        const sliderVal = parseInt(topnInput?.value || slider.value, 10);
+        const nTopGenes = Math.min(sliderVal, maxShapGenes);
+        // Sync slider UI to actual value used
+        slider.max = maxShapGenes;
+        slider.value = nTopGenes;
+        slider.step = this._getTopNStep(nTopGenes);
+        if (topnInput) { topnInput.max = maxShapGenes; topnInput.value = nTopGenes; }
 
         App.showLoading('Computing SHAP heatmap...');
         try {
@@ -647,37 +711,17 @@ const Heatmap = {
         });
 
         // =============================================
-        // 2. COLUMN DENDROGRAM
+        // 2. COLUMN DENDROGRAM — single consolidated trace
         // =============================================
         if (hasColDendro) {
-            const { icoord, dcoord } = col_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: icoord[i].map(v => (v - 5) / 10),
-                    y: dcoord[i],
-                    mode: 'lines',
-                    line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x', yaxis: 'y2',
-                    showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(col_dendrogram, {type: 'col', xaxis: 'x', yaxis: 'y2'}));
         }
 
         // =============================================
-        // 3. ROW DENDROGRAM (left of gene names)
+        // 3. ROW DENDROGRAM — single consolidated trace
         // =============================================
         if (hasRowDendro) {
-            const { icoord, dcoord } = row_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: dcoord[i].map(v => -v),
-                    y: icoord[i].map(v => (v - 5) / 10),
-                    mode: 'lines',
-                    line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x3', yaxis: 'y6',
-                    showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(row_dendrogram, {type: 'row', xaxis: 'x3', yaxis: 'y6'}));
         }
 
         // =============================================
@@ -877,7 +921,20 @@ const Heatmap = {
         this._isShapMode = false;
         this._isDegMode = true;
 
-        const nTopGenes = parseInt(document.getElementById('topn-slider').value) || 30;
+        const DEG_MAX_GENES = 500;
+        this._activeMax = DEG_MAX_GENES;
+        const degSlider = document.getElementById('topn-slider');
+        const degInput = document.getElementById('topn-input');
+        const rawSlider = parseInt(degInput?.value || degSlider.value, 10) || 30;
+        const nTopGenes = Math.min(rawSlider, DEG_MAX_GENES);
+        // Sync slider UI to DEG range
+        degSlider.max = DEG_MAX_GENES;
+        degSlider.value = nTopGenes;
+        degSlider.step = this._getTopNStep(nTopGenes);
+        if (degInput) { degInput.max = DEG_MAX_GENES; degInput.value = nTopGenes; }
+        if (rawSlider > DEG_MAX_GENES) {
+            App.showToast(`DEG heatmap capped at ${DEG_MAX_GENES} genes`, 'info');
+        }
 
         App.showLoading('Computing DEG heatmap...');
         try {
@@ -977,28 +1034,14 @@ const Heatmap = {
             },
         });
 
-        // 2. COLUMN DENDROGRAM
+        // 2. COLUMN DENDROGRAM — single consolidated trace
         if (hasColDendro) {
-            const { icoord, dcoord } = col_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: icoord[i].map(v => (v - 5) / 10), y: dcoord[i],
-                    mode: 'lines', line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x', yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(col_dendrogram, {type: 'col', xaxis: 'x', yaxis: 'y2'}));
         }
 
-        // 3. ROW DENDROGRAM
+        // 3. ROW DENDROGRAM — single consolidated trace
         if (hasRowDendro) {
-            const { icoord, dcoord } = row_dendrogram;
-            for (let i = 0; i < icoord.length; i++) {
-                traces.push({
-                    x: dcoord[i].map(v => -v), y: icoord[i].map(v => (v - 5) / 10),
-                    mode: 'lines', line: { color: 'rgba(148, 163, 184, 0.6)', width: 1.2 },
-                    xaxis: 'x3', yaxis: 'y6', showlegend: false, hoverinfo: 'skip',
-                });
-            }
+            traces.push(this._buildDendroTrace(row_dendrogram, {type: 'row', xaxis: 'x3', yaxis: 'y6'}));
         }
 
         // 4. GROUP COLOR BAR

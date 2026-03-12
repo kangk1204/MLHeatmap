@@ -287,20 +287,34 @@ const Groups = {
         this.updateGroupCounts();
     },
 
-    toggleExclude(chip) {
-        chip.classList.toggle('excluded');
+    async toggleExclude(chip) {
+        const willExclude = !chip.classList.contains('excluded');
+        chip.classList.toggle('excluded', willExclude);
         const name = chip.dataset.sample;
+        try {
+            if (willExclude) {
+                this.selectedSamples.delete(name);
+                chip.classList.remove('selected');
+                if (App.state.sessionId) {
+                    await API.excludeSamples(App.state.sessionId, [name]);
+                }
+            } else if (App.state.sessionId) {
+                await API.includeSamples(App.state.sessionId, [name]);
+            }
+
+            App.state.groups = this.getGroups();
+            App.invalidateAnalysisState();
+        } catch (err) {
+            chip.classList.toggle('excluded', !willExclude);
+            App.showToast(err.message, 'error');
+        }
+
         if (chip.classList.contains('excluded')) {
             this.selectedSamples.delete(name);
             chip.classList.remove('selected');
-            if (App.state.sessionId) {
-                API.excludeSamples(App.state.sessionId, [name]);
-            }
-        } else {
-            if (App.state.sessionId) {
-                API.includeSamples(App.state.sessionId, [name]);
-            }
         }
+        this.updatePoolCount();
+        this.updateGroupCounts();
         this.updateSelectionCount();
     },
 
@@ -437,6 +451,7 @@ const Groups = {
         try {
             await API.setGroups(App.state.sessionId, groups);
             App.state.groups = groups;
+            App.invalidateAnalysisState();
             App.markStepCompleted('groups');
             App.goToPanel('biomarker');
         } catch (err) {

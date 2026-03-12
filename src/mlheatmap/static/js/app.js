@@ -56,12 +56,98 @@ const App = {
         if (navBtn) navBtn.classList.add('active');
 
         this.state.currentPanel = panelId;
+
+        // Refresh export card visibility when entering export panel
+        if (panelId === 'export' && typeof Export !== 'undefined') {
+            Export.refresh();
+        }
     },
 
     markStepCompleted(stepId) {
         this.completedSteps.add(stepId);
         const navBtn = document.querySelector(`.nav-step[data-panel="${stepId}"]`);
         if (navBtn) navBtn.classList.add('completed');
+    },
+
+    clearCompletedSteps(stepIds) {
+        stepIds.forEach(stepId => {
+            this.completedSteps.delete(stepId);
+            const navBtn = document.querySelector(`.nav-step[data-panel="${stepId}"]`);
+            if (navBtn) navBtn.classList.remove('completed');
+        });
+    },
+
+    invalidateAnalysisState({ clearNormalization = false } = {}) {
+        this.state.biomarkerResults = null;
+        this.state.degResults = null;
+        if (clearNormalization) this.state.totalGenes = null;
+
+        const clearPlot = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            Plotly.purge(el);
+            el.innerHTML = '';
+        };
+
+        ['heatmap-plot', 'shap-plot', 'auc-plot', 'optimal-auc-curve', 'volcano-plot'].forEach(clearPlot);
+        if (clearNormalization) clearPlot('dist-plot');
+
+        ['biomarker-results', 'deg-results'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+        if (clearNormalization) {
+            const normResult = document.getElementById('norm-result');
+            if (normResult) normResult.classList.add('hidden');
+        }
+
+        const aucNote = document.getElementById('panel-auc-note');
+        if (aucNote) aucNote.classList.add('hidden');
+        const rocTag = document.getElementById('roc-eval-tag');
+        if (rocTag) {
+            rocTag.textContent = '';
+            rocTag.className = 'eval-tag';
+        }
+        const renderBadge = document.getElementById('render-mode-badge');
+        if (renderBadge) renderBadge.style.display = 'none';
+
+        if (typeof Heatmap !== 'undefined') {
+            if (Heatmap._serverImageUrl) {
+                URL.revokeObjectURL(Heatmap._serverImageUrl);
+                Heatmap._serverImageUrl = null;
+            }
+            const maxGenes = clearNormalization ? 60000 : (this.state.totalGenes || Heatmap._maxGenes || 60000);
+            Heatmap._isShapMode = false;
+            Heatmap._isDegMode = false;
+            Heatmap._maxGenes = maxGenes;
+            Heatmap._activeMax = maxGenes;
+
+            const topnSlider = document.getElementById('topn-slider');
+            const topnInput = document.getElementById('topn-input');
+            const currentValue = clearNormalization
+                ? 500
+                : Math.min(
+                    parseInt(topnInput?.value || topnSlider?.value || '500', 10) || 500,
+                    maxGenes,
+                );
+            if (topnSlider) {
+                topnSlider.max = maxGenes;
+                topnSlider.step = typeof Heatmap._getTopNStep === 'function'
+                    ? Heatmap._getTopNStep(currentValue)
+                    : (maxGenes > 10000 ? 1000 : maxGenes > 5000 ? 500 : 50);
+                topnSlider.value = currentValue;
+            }
+            if (topnInput) {
+                topnInput.max = maxGenes;
+                topnInput.value = currentValue;
+            }
+        }
+
+        this.clearCompletedSteps(clearNormalization ? ['normalize', 'heatmap', 'biomarker'] : ['heatmap', 'biomarker']);
+
+        if (typeof Export !== 'undefined') {
+            Export.refresh();
+        }
     },
 
     async mapGenes() {
@@ -73,6 +159,7 @@ const App = {
         this.showLoading('Mapping gene IDs...');
         try {
             const result = await API.mapGenes(this.state.sessionId, species, idType);
+            this.invalidateAnalysisState({ clearNormalization: true });
 
             document.getElementById('mapped-count').textContent = result.mapped_count.toLocaleString();
             document.getElementById('unmapped-count').textContent = result.unmapped_count.toLocaleString();
@@ -102,6 +189,7 @@ const App = {
         this.showLoading('Normalizing...');
         try {
             const result = await API.normalize(this.state.sessionId, method);
+            this.invalidateAnalysisState();
 
             document.getElementById('norm-min').textContent = result.stats.min.toFixed(2);
             document.getElementById('norm-median').textContent = result.stats.median.toFixed(2);
@@ -136,6 +224,12 @@ const App = {
                 Plotly.newPlot('dist-plot', [trace], layout, { responsive: true, displayModeBar: false });
             }
 
+            // Store total gene count for slider capping
+            if (result.shape && result.shape.length >= 1) {
+                this.state.totalGenes = result.shape[0];
+                Heatmap.updateTopNMax(result.shape[0]);
+            }
+
             document.getElementById('norm-result').classList.remove('hidden');
             this.markStepCompleted('normalize');
             this.showToast(`Normalization complete (${method})`, 'success');
@@ -153,6 +247,9 @@ const App = {
         this.state.species = 'unknown';
         this.state.idType = 'unknown';
         this.state.groups = {};
+        this.state.biomarkerResults = null;
+        this.state.degResults = null;
+        this.state.totalGenes = null;
         this.completedSteps.clear();
 
         // Reset sidebar step indicators
@@ -163,10 +260,24 @@ const App = {
         document.getElementById('upload-zone').style.display = '';
 
         // Clear plots
-        ['heatmap-plot', 'dist-plot', 'shap-plot', 'auc-plot', 'optimal-auc-curve'].forEach(id => {
+        ['heatmap-plot', 'dist-plot', 'shap-plot', 'auc-plot', 'optimal-auc-curve', 'volcano-plot'].forEach(id => {
             const el = document.getElementById(id);
             if (el) Plotly.purge(el);
         });
+
+        // Reset heatmap mode flags and slider max
+        Heatmap._isShapMode = false;
+        Heatmap._isDegMode = false;
+        Heatmap._maxGenes = 60000;
+        Heatmap._activeMax = 60000;
+        const topnSlider = document.getElementById('topn-slider');
+        const topnInput = document.getElementById('topn-input');
+        if (topnSlider) { topnSlider.max = 60000; topnSlider.value = 500; }
+        if (topnInput) { topnInput.max = 60000; topnInput.value = 500; }
+
+        // Hide DEG results
+        const degResults = document.getElementById('deg-results');
+        if (degResults) degResults.classList.add('hidden');
 
         // Reset groups
         Groups.groupCount = 0;

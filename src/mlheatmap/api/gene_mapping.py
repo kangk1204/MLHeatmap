@@ -49,6 +49,14 @@ async def map_genes(request: Request, body: MappingRequest):
         session.mapped_counts = session.raw_counts.copy()
         session.gene_names = session.raw_counts.index.astype(str).tolist()
 
+    # Invalidate downstream state — row space has changed
+    session.normalized = None
+    session.size_factors = None
+    session.norm_method = ""
+    session.biomarker_results = None
+    session.deg_results = None
+    session.heatmap_data = None
+
     return {
         "mapped_count": len(mapping),
         "unmapped_count": len(unmapped),

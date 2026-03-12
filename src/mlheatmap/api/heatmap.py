@@ -47,6 +47,7 @@ async def get_heatmap(
     )
 
     session.heatmap_data = result
+    session.heatmap_color_scale = color_scale
 
     # Return a copy with groups/color_scale to avoid mutating stored data
     response = dict(result)
@@ -84,6 +85,8 @@ async def render_heatmap(
     expression = session.normalized[:, sample_mask]
     sample_names = [session.sample_names[i] for i in sample_mask]
 
+    session.heatmap_color_scale = color_scale
+
     try:
         image_bytes = await asyncio.to_thread(
             render_heatmap_image,
@@ -111,7 +114,7 @@ async def render_heatmap(
 async def get_shap_heatmap(
     request: Request,
     session_id: str = Query(...),
-    top_n: int = Query(20, ge=5, le=100),
+    top_n: int = Query(20, ge=5, le=200),
     distance: str = Query("correlation"),
     linkage: str = Query("average"),
     color_scale: str = Query("RdBu_r"),
@@ -166,6 +169,8 @@ async def get_shap_heatmap(
         cluster_rows=cluster_rows,
         cluster_cols=cluster_cols,
     )
+
+    session.heatmap_color_scale = color_scale
 
     response = dict(result)
     response["groups"] = session.groups
@@ -241,6 +246,8 @@ async def get_deg_heatmap(
         cluster_rows=cluster_rows,
         cluster_cols=cluster_cols,
     )
+
+    session.heatmap_color_scale = color_scale
 
     response = dict(result)
     response["groups"] = session.groups
