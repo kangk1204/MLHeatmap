@@ -130,17 +130,20 @@ async def deg_analysis(
     # Store for heatmap use
     session.deg_results = result
 
-    # Limit response size: send top 500 for volcano plot + all significant
-    top_results = result["results"][:500]
-    sig_genes = [r for r in result["results"] if r["direction"] != "ns"]
-    # Merge (avoid duplicates)
-    seen = {r["gene"] for r in top_results}
-    for r in sig_genes:
-        if r["gene"] not in seen:
-            top_results.append(r)
+    # For ≤20,000 genes, send all results for complete volcano plot
+    # For larger datasets, send top by p-value + all significant
+    all_results = result["results"]
+    if len(all_results) > 20000:
+        top_results = all_results[:5000]
+        sig_genes = [r for r in all_results if r["direction"] != "ns"]
+        seen = {r["gene"] for r in top_results}
+        for r in sig_genes:
+            if r["gene"] not in seen:
+                top_results.append(r)
+        all_results = top_results
 
     response = {
-        "results": top_results,
+        "results": all_results,
         "summary": result["summary"],
         "group_names": result["group_names"],
         "thresholds": result["thresholds"],

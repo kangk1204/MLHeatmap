@@ -54,6 +54,9 @@ def compute_heatmap_data(
     """
     n_genes, n_samples = expression.shape
 
+    # Replace non-finite values (from log2(0) = -inf, etc.)
+    expression = np.nan_to_num(expression, nan=0.0, posinf=0.0, neginf=0.0)
+
     # Select top-N variable genes
     expr_sub, genes_sub, _ = select_top_variable_genes(expression, gene_names, top_n)
     top_n = len(genes_sub)
@@ -105,7 +108,8 @@ def compute_heatmap_data(
     row_stds = np.maximum(row_stds, 1e-6)
     z_scored = (ordered - row_means) / row_stds
 
-    # Clip extreme values
+    # Replace any remaining NaN/inf and clip extreme values
+    z_scored = np.nan_to_num(z_scored, nan=0.0, posinf=3.0, neginf=-3.0)
     z_scored = np.clip(z_scored, -3, 3)
 
     return {

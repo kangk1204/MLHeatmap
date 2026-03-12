@@ -61,6 +61,9 @@ def render_heatmap_image(
     Uses seaborn.clustermap with dark theme styling matching the app.
     Handles large gene sets (up to 60,000) with adaptive clustering.
     """
+    # Replace non-finite values (from log2(0) = -inf, etc.)
+    expression = np.nan_to_num(expression, nan=0.0, posinf=0.0, neginf=0.0)
+
     # Select top variable genes
     expr_sub, genes_sub, _ = select_top_variable_genes(expression, gene_names, top_n)
     n_genes = len(genes_sub)
@@ -73,6 +76,7 @@ def render_heatmap_image(
     row_stds = np.std(expr_sub, axis=1, keepdims=True)
     row_stds = np.maximum(row_stds, 1e-6)
     z_scored = (expr_sub - row_means) / row_stds
+    z_scored = np.nan_to_num(z_scored, nan=0.0, posinf=3.0, neginf=-3.0)
     z_scored = np.clip(z_scored, -3, 3)
 
     # Build DataFrame
