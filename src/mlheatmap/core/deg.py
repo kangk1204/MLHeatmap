@@ -15,6 +15,7 @@ def compute_deg(
     method: str = "wilcoxon",
     log2fc_threshold: float = 1.0,
     pvalue_threshold: float = 0.05,
+    use_raw_pvalue: bool = False,
 ) -> dict:
     """Run DEG analysis between groups.
 
@@ -31,12 +32,14 @@ def compute_deg(
     log2fc_threshold : float
         |log2FC| threshold for significance (default 1.0).
     pvalue_threshold : float
-        Adjusted p-value threshold (default 0.05).
+        P-value threshold for significance (default 0.05).
+    use_raw_pvalue : bool
+        If True, use raw p-value instead of FDR-adjusted for significance.
 
     Returns
     -------
     dict with keys:
-        - results: list of per-gene dicts sorted by adj_pvalue
+        - results: list of per-gene dicts sorted by the chosen p-value
         - summary: dict with counts of up/down/not significant
         - thresholds: dict with fc/pvalue cutoffs used
     """
@@ -101,10 +104,13 @@ def compute_deg(
 
     for i, r in enumerate(results):
         r["adj_pvalue"] = float(adj_pvals[i])
-        r["neg_log10_p"] = float(-np.log10(max(r["adj_pvalue"], 1e-300)))
+
+        # Use raw or adjusted p-value for significance and display
+        p_for_sig = r["pvalue"] if use_raw_pvalue else r["adj_pvalue"]
+        r["neg_log10_p"] = float(-np.log10(max(p_for_sig, 1e-300)))
 
         # Classification
-        is_sig = r["adj_pvalue"] < pvalue_threshold
+        is_sig = p_for_sig < pvalue_threshold
         if is_sig and r["log2fc"] > log2fc_threshold:
             r["direction"] = "up"
             n_up += 1
@@ -115,8 +121,9 @@ def compute_deg(
             r["direction"] = "ns"
             n_ns += 1
 
-    # Sort by adjusted p-value
-    results.sort(key=lambda r: r["adj_pvalue"])
+    # Sort by the chosen p-value type
+    sort_key = "pvalue" if use_raw_pvalue else "adj_pvalue"
+    results.sort(key=lambda r: r[sort_key])
 
     return {
         "results": results,
@@ -132,6 +139,7 @@ def compute_deg(
             "pvalue": pvalue_threshold,
         },
         "method": method,
+        "pvalue_type": "raw" if use_raw_pvalue else "fdr",
     }
 
 

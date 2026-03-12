@@ -877,7 +877,7 @@ const Heatmap = {
         this._isShapMode = false;
         this._isDegMode = true;
 
-        const nTopGenes = Math.min(parseInt(document.getElementById('topn-slider').value) || 30, 200);
+        const nTopGenes = parseInt(document.getElementById('topn-slider').value) || 30;
 
         App.showLoading('Computing DEG heatmap...');
         try {
@@ -895,7 +895,8 @@ const Heatmap = {
             const header = document.querySelector('#panel-heatmap .panel-header h1');
             const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
             if (header) header.textContent = 'DEG Heatmap';
-            if (subtitle) subtitle.textContent = `Top ${nTopGenes} DEGs by adjusted p-value (${data.method || 'Wilcoxon'} test)`;
+            const pType = App.state.degResults?.pvalue_type === 'raw' ? 'raw p-value' : 'adjusted p-value';
+            if (subtitle) subtitle.textContent = `Top ${nTopGenes} DEGs by ${pType} (${data.method || 'Wilcoxon'} test)`;
 
             this.plotDegHeatmap(data);
             App.markStepCompleted('heatmap');

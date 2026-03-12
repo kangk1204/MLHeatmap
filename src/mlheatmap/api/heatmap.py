@@ -183,7 +183,7 @@ async def get_shap_heatmap(
 async def get_deg_heatmap(
     request: Request,
     session_id: str = Query(...),
-    top_n: int = Query(30, ge=5, le=200),
+    top_n: int = Query(30, ge=5, le=5000),
     distance: str = Query("correlation"),
     linkage: str = Query("average"),
     color_scale: str = Query("RdBu_r"),
