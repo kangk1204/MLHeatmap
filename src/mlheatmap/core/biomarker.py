@@ -9,7 +9,6 @@ Supported models:
 """
 
 import numpy as np
-from sklearn.feature_selection import f_classif
 from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
@@ -200,15 +199,12 @@ def run_biomarker_analysis(
 
     _progress("preprocessing", 5, f"Data prepared — using {model_display}")
 
-    # 2. Pre-filter by ANOVA F-statistic (group-aware)
+    # 2. Variance prefilter is performed per fold (training data only)
+    #    to prevent any test-fold information influencing the feature space.
     prefilter_n = min(2000, X_all.shape[1])
-    f_scores, _ = f_classif(X_all, y)
-    f_scores = np.nan_to_num(f_scores, nan=0.0)
-    top_var_idx = np.argsort(f_scores)[-prefilter_n:]
-    X_filt = X_all[:, top_var_idx]
-    filt_names = [all_gene_names[i] for i in top_var_idx]
+    n_all_genes = X_all.shape[1]
 
-    _progress("training", 10, f"Pre-filtered to top {prefilter_n} genes (ANOVA)")
+    _progress("training", 10, f"Preparing nested CV (prefilter top {prefilter_n} per fold)")
 
     # 3. Build model
     _, use_shap_tree, needs_scaling = _build_model(model, n_estimators, len(y))
@@ -218,21 +214,37 @@ def run_biomarker_analysis(
     n_splits = max(2, min(cv_folds, min_class_count))
     outer_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    # Accumulators
-    fold_importances = np.zeros(X_filt.shape[1])
-    fold_shap_abs_sum = np.zeros(X_filt.shape[1])
+    # Accumulators (on FULL gene space — fold results mapped back)
+    fold_importances = np.zeros(n_all_genes)
+    fold_shap_abs_sum = np.zeros(n_all_genes)
     fold_shap_count = 0
     fold_accuracies = []
-    sample_shap_abs = np.zeros_like(X_filt)
+    sample_shap_abs = np.zeros((len(y), n_all_genes))
+
+    # ── Out-of-fold ROC accumulators (truly unbiased) ──
+    n_classes = len(le.classes_)
+    y_bin_all = label_binarize(y, classes=range(n_classes))
+    if n_classes == 2:
+        y_bin_all = np.column_stack([1 - y_bin_all.ravel(), y_bin_all.ravel()])
+    roc_mean_fpr = np.linspace(0, 1, 100)
+    fold_roc_tprs: dict[int, list] = {i: [] for i in range(n_classes)}
+    fold_roc_aucs: dict[int, list] = {i: [] for i in range(n_classes)}
 
     _progress("training", 15, f"Starting nested CV ({n_splits} folds) with {model_display}")
 
-    for fold_i, (train_idx, test_idx) in enumerate(outer_cv.split(X_filt, y)):
+    for fold_i, (train_idx, test_idx) in enumerate(outer_cv.split(X_all, y)):
         pct = 15 + int(fold_i / n_splits * 55)
         _progress("training", pct, f"CV fold {fold_i+1}/{n_splits}")
 
-        X_train, X_test = X_filt[train_idx], X_filt[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
+
+        # Per-fold variance filter (training data only — no test leakage)
+        train_var = np.var(X_all[train_idx], axis=0)
+        train_var = np.nan_to_num(train_var, nan=0.0)
+        fold_var_idx = np.argsort(train_var)[-prefilter_n:]
+
+        X_train = X_all[train_idx][:, fold_var_idx]
+        X_test = X_all[test_idx][:, fold_var_idx]
 
         # Build fresh model for this fold
         clf, _, _ = _build_model(model, n_estimators, len(y_train))
@@ -246,20 +258,41 @@ def run_biomarker_analysis(
 
         clf.fit(X_train, y_train)
 
-        # Feature importances
+        # Feature importances (captured per-fold for nested top-N evaluation)
         if hasattr(clf, 'feature_importances_'):
-            fold_importances += clf.feature_importances_
+            this_fi = clf.feature_importances_
         elif hasattr(clf, 'coef_'):
-            # For linear models, use absolute coefficients as importance
             coef = np.abs(clf.coef_)
-            if coef.ndim > 1:
-                coef = np.mean(coef, axis=0)
-            fold_importances += coef
+            this_fi = np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
         else:
-            fold_importances += np.ones(X_filt.shape[1]) / X_filt.shape[1]
+            this_fi = np.ones(len(fold_var_idx)) / len(fold_var_idx)
+        fold_importances[fold_var_idx] += this_fi
 
         # Accuracy
         fold_accuracies.append(float(np.mean(clf.predict(X_test) == y_test)))
+
+        # ── Per-fold top-N evaluation for unbiased ROC ──
+        # Gene selection uses only training-fold importance → no test leakage
+        fold_topn_idx = np.argsort(this_fi)[-n_top_genes:]
+        try:
+            clf_topn, _, _ = _build_model(model, min(100, n_estimators), len(y_train))
+            X_tr_topn = X_all[train_idx][:, fold_var_idx[fold_topn_idx]]
+            X_te_topn = X_all[test_idx][:, fold_var_idx[fold_topn_idx]]
+            if needs_scaling:
+                sc_topn = StandardScaler()
+                X_tr_topn = sc_topn.fit_transform(X_tr_topn)
+                X_te_topn = sc_topn.transform(X_te_topn)
+            clf_topn.fit(X_tr_topn, y_train)
+            y_prob_topn = clf_topn.predict_proba(X_te_topn)
+            y_test_bin = y_bin_all[test_idx]
+            for ci in range(n_classes):
+                if ci < y_prob_topn.shape[1]:
+                    fpr_f, tpr_f, _ = roc_curve(y_test_bin[:, ci], y_prob_topn[:, ci])
+                    fold_roc_tprs[ci].append(np.interp(roc_mean_fpr, fpr_f, tpr_f))
+                    fold_roc_tprs[ci][-1][0] = 0.0
+                    fold_roc_aucs[ci].append(auc(fpr_f, tpr_f))
+        except Exception:
+            pass  # If top-N model fails for this fold, skip
 
         # SHAP on held-out test fold (no data leakage)
         try:
@@ -291,9 +324,9 @@ def run_biomarker_analysis(
             if shap_abs_fold.ndim == 1:
                 shap_abs_fold = shap_abs_fold.reshape(1, -1)
 
-            fold_shap_abs_sum += np.sum(shap_abs_fold, axis=0)
+            fold_shap_abs_sum[fold_var_idx] += np.sum(shap_abs_fold, axis=0)
             fold_shap_count += shap_abs_fold.shape[0]
-            sample_shap_abs[test_idx] = shap_abs_fold
+            sample_shap_abs[np.ix_(test_idx, fold_var_idx)] = shap_abs_fold
         except Exception as e:
             # If SHAP fails, use feature importances as fallback
             _progress("training", pct, f"SHAP fallback fold {fold_i+1} ({e})")
@@ -302,10 +335,10 @@ def run_biomarker_analysis(
             elif hasattr(clf, 'coef_'):
                 fi = np.mean(np.abs(clf.coef_), axis=0) if clf.coef_.ndim > 1 else np.abs(clf.coef_).ravel()
             else:
-                fi = np.ones(X_filt.shape[1]) / X_filt.shape[1]
+                fi = np.ones(len(fold_var_idx)) / len(fold_var_idx)
             for ti in test_idx:
-                sample_shap_abs[ti] = fi
-            fold_shap_abs_sum += fi * len(test_idx)
+                sample_shap_abs[ti, fold_var_idx] = fi
+            fold_shap_abs_sum[fold_var_idx] += fi * len(test_idx)
             fold_shap_count += len(test_idx)
 
     # Average across folds
@@ -318,16 +351,34 @@ def run_biomarker_analysis(
     # 5. Top genes by SHAP value (more interpretable than raw model importance)
     top_idx = np.argsort(avg_shap_mean)[-n_top_genes:][::-1]
 
-    # 6. Cross-validated AUC on top genes
-    _progress("auc", 80, "Computing cross-validated AUC")
-    X_top = X_filt[:, top_idx]
-    roc_data = _compute_cv_roc(X_top, y, le.classes_, model, n_estimators,
-                               outer_cv, needs_scaling)
+    # 6. Aggregate out-of-fold ROC (unbiased — each fold selected genes
+    #    from training-only importance and evaluated on the held-out test set)
+    _progress("auc", 80, "Aggregating out-of-fold ROC curves")
+    roc_data = []
+    for ci, cls in enumerate(le.classes_):
+        if fold_roc_tprs[ci]:
+            mean_tpr = np.mean(fold_roc_tprs[ci], axis=0)
+            mean_tpr[-1] = 1.0
+            roc_data.append({
+                "group": str(cls),
+                "fpr": roc_mean_fpr.tolist(),
+                "tpr": mean_tpr.tolist(),
+                "auc": float(np.mean(fold_roc_aucs[ci])),
+                "std": float(np.std(fold_roc_aucs[ci])),
+            })
+        else:
+            roc_data.append({
+                "group": str(cls),
+                "fpr": roc_mean_fpr.tolist(),
+                "tpr": roc_mean_fpr.tolist(),
+                "auc": 0.5,
+                "std": 0.0,
+            })
 
     # 7. Optimal gene combination (dispatched by panel_method)
     max_panel = min(n_top_genes, 15)
     combo_args = dict(
-        X_filt=X_filt, y=y, top_idx=top_idx, filt_names=filt_names,
+        X_filt=X_all, y=y, top_idx=top_idx, filt_names=all_gene_names,
         classes=le.classes_, model=model, n_estimators=n_estimators,
         needs_scaling=needs_scaling, n_splits=n_splits, max_genes=max_panel,
     )
@@ -352,7 +403,7 @@ def run_biomarker_analysis(
     for rank, idx in enumerate(top_idx):
         top_genes.append({
             "rank": rank + 1,
-            "symbol": filt_names[idx],
+            "symbol": all_gene_names[idx],
             "importance": float(avg_importances[idx]),
             "shap_mean_abs": float(avg_shap_mean[idx]),
         })
@@ -360,15 +411,16 @@ def run_biomarker_analysis(
     shap_plot_data = []
     for rank, idx in enumerate(top_idx):
         shap_plot_data.append({
-            "gene": filt_names[idx],
+            "gene": all_gene_names[idx],
             "values": sample_shap_abs[:, idx].tolist(),
-            "expression": X_filt[:, idx].tolist(),
+            "expression": X_all[:, idx].tolist(),
         })
 
     return {
         "top_genes": top_genes,
         "shap_plot_data": shap_plot_data,
         "roc_data": roc_data,
+        "roc_evaluation": "out_of_fold",
         "accuracy": accuracy,
         "group_names": group_names,
         "sample_labels": labels,
@@ -445,6 +497,7 @@ def _find_optimal_combination(
         "n_genes": len(best_set),
         "auc_curve": auc_curve,
         "method": "forward",
+        "auc_note": "cv_model_selection",
     }
 
 
@@ -588,6 +641,7 @@ def _lasso_panel(X_filt, y, top_idx, filt_names, classes,
         "n_genes": best_n,
         "auc_curve": auc_curve,
         "method": "lasso",
+        "auc_note": "cv_model_selection",
     }
 
 
@@ -650,12 +704,12 @@ def _stability_panel(X_filt, y, top_idx, filt_names, classes,
             break
         threshold -= 0.1
 
-    if np.sum(freq > 0) < 2:
-        # Fallback: rank all by frequency
+    if np.sum(freq >= threshold) < 2:
+        # Fallback: rank all genes with any selection by frequency
         ranked = np.argsort(freq)[::-1][:max_genes]
     else:
-        # Take stable genes, ranked by frequency
-        stable_indices = np.where(freq > 0)[0]
+        # Take genes meeting the stability threshold, ranked by frequency
+        stable_indices = np.where(freq >= threshold)[0]
         ranked = sorted(stable_indices, key=lambda i: freq[i], reverse=True)[:max_genes]
 
     ordered_idx = [candidate_idx[i] for i in ranked]
@@ -675,6 +729,7 @@ def _stability_panel(X_filt, y, top_idx, filt_names, classes,
         "n_genes": best_n,
         "auc_curve": auc_curve,
         "method": "stability",
+        "auc_note": "cv_model_selection",
     }
 
 
@@ -754,52 +809,5 @@ def _mrmr_panel(X_filt, y, top_idx, filt_names, classes,
         "n_genes": best_n,
         "auc_curve": auc_curve,
         "method": "mrmr",
+        "auc_note": "cv_model_selection",
     }
-
-
-def _compute_cv_roc(X, y, classes, model, n_estimators, cv, needs_scaling):
-    """Compute per-class ROC curves with cross-validation."""
-    n_classes = len(classes)
-    y_bin = label_binarize(y, classes=range(n_classes))
-    if n_classes == 2:
-        y_bin = np.column_stack([1 - y_bin.ravel(), y_bin.ravel()])
-
-    roc_curves = []
-    for i, cls in enumerate(classes):
-        tprs = []
-        aucs_list = []
-        mean_fpr = np.linspace(0, 1, 100)
-
-        for train_idx, test_idx in cv.split(X, y):
-            clf, _, _ = _build_model(model, n_estimators, len(train_idx))
-
-            X_train, X_test = X[train_idx], X[test_idx]
-            if needs_scaling:
-                scaler = StandardScaler()
-                X_train = scaler.fit_transform(X_train)
-                X_test = scaler.transform(X_test)
-
-            clf.fit(X_train, y[train_idx])
-            y_score = clf.predict_proba(X_test)
-
-            if i < y_score.shape[1]:
-                fpr, tpr, _ = roc_curve(y_bin[test_idx, i], y_score[:, i])
-                tprs.append(np.interp(mean_fpr, fpr, tpr))
-                tprs[-1][0] = 0.0
-                aucs_list.append(auc(fpr, tpr))
-
-        if tprs:
-            mean_tpr = np.mean(tprs, axis=0)
-            mean_tpr[-1] = 1.0
-        else:
-            mean_tpr = mean_fpr
-
-        roc_curves.append({
-            "group": str(cls),
-            "fpr": mean_fpr.tolist(),
-            "tpr": mean_tpr.tolist(),
-            "auc": float(np.mean(aucs_list)) if aucs_list else 0.5,
-            "std": float(np.std(aucs_list)) if aucs_list else 0.0,
-        })
-
-    return roc_curves

@@ -26,11 +26,14 @@ async def normalize(request: Request, body: NormalizeRequest):
     counts = df.values.astype(float)
 
     if body.method == "deseq2":
-        normalized = deseq2_normalize(counts)
+        normalized, size_factors = deseq2_normalize(counts, return_size_factors=True)
+        session.size_factors = size_factors
     elif body.method == "tpm":
         normalized = tpm_normalize(counts)
+        session.size_factors = None
     elif body.method == "log2":
         normalized = log2_normalize(counts)
+        session.size_factors = None
     else:
         return JSONResponse({"error": f"Unknown method: {body.method}"}, status_code=400)
 
@@ -38,6 +41,11 @@ async def normalize(request: Request, body: NormalizeRequest):
     session.norm_method = body.method
     session.gene_names = df.index.tolist()
     session.sample_names = df.columns.tolist()
+
+    # Invalidate downstream caches — normalization changed
+    session.biomarker_results = None
+    session.deg_results = None
+    session.heatmap_data = None
 
     finite = normalized[np.isfinite(normalized)]
     stats = {

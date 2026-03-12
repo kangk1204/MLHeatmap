@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import numpy as np
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -12,7 +13,7 @@ router = APIRouter(tags=["biomarker"])
 async def biomarker_stream(
     request: Request,
     session_id: str = Query(...),
-    n_top_genes: int = Query(20, ge=5, le=100),
+    n_top_genes: int = Query(20, ge=5, le=200),
     n_estimators: int = Query(500, ge=50, le=2000),
     cv_folds: int = Query(5, ge=2, le=10),
     model: str = Query("rf"),
@@ -23,10 +24,49 @@ async def biomarker_stream(
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
 
-    if len(session.groups) < 2:
-        return JSONResponse({"error": "Need at least 2 groups"}, status_code=400)
+    def validate_request():
+        if len(session.groups) < 2:
+            return None, "Need at least 2 groups"
+
+        sample_groups = {}
+        for group, samples in session.groups.items():
+            for s in samples:
+                if s in session.sample_names and s not in session.excluded_samples:
+                    sample_groups.setdefault(group, []).append(
+                        session.sample_names.index(s)
+                    )
+
+        if len(sample_groups) < 2:
+            return None, f"Only {len(sample_groups)} group(s) have valid samples after exclusion — need ≥ 2"
+
+        for gname, gidx in sample_groups.items():
+            if len(gidx) < 2:
+                return None, f"Group '{gname}' has only {len(gidx)} sample(s) after exclusion — need ≥ 2"
+
+        valid_models = {"rf", "random_forest", "xgboost", "xgb", "lightgbm", "lgbm",
+                        "logistic_regression", "logistic", "lr_l1",
+                        "svm", "svm_linear", "linear_svm"}
+        if model.lower().replace(" ", "_") not in valid_models:
+            return None, (
+                f"Unknown model: {model}. Choose from: rf, xgboost, lightgbm, "
+                "logistic_regression, svm_linear"
+            )
+
+        valid_panels = {"forward", "lasso", "stability", "mrmr"}
+        if panel_method not in valid_panels:
+            return None, (
+                f"Unknown panel method: {panel_method}. "
+                f"Choose from: {', '.join(sorted(valid_panels))}"
+            )
+
+        return sample_groups, None
 
     async def event_generator():
+        sample_groups, validation_error = validate_request()
+        if validation_error:
+            yield f"event: app_error\ndata: {json.dumps({'detail': validation_error})}\n\n"
+            return
+
         progress_queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
@@ -37,15 +77,6 @@ async def biomarker_stream(
             )
 
         from mlheatmap.core.biomarker import run_biomarker_analysis
-
-        # Build sample indices from groups
-        sample_groups = {}
-        for group, samples in session.groups.items():
-            for s in samples:
-                if s in session.sample_names:
-                    sample_groups.setdefault(group, []).append(
-                        session.sample_names.index(s)
-                    )
 
         future = loop.run_in_executor(
             None,
@@ -82,7 +113,9 @@ async def biomarker_stream(
             session.biomarker_results = result
             yield f"event: complete\ndata: {json.dumps(result, default=_json_safe)}\n\n"
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+            import traceback
+            traceback.print_exc()
+            yield f"event: app_error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -106,6 +139,14 @@ async def deg_analysis(
             {"error": "DEG requires exactly 2 groups"}, status_code=400
         )
 
+    # Validate method
+    valid_methods = ("wilcoxon", "ttest")
+    if method not in valid_methods:
+        return JSONResponse(
+            {"error": f"Unknown DEG method '{method}'. Use one of: {', '.join(valid_methods)}"},
+            status_code=400,
+        )
+
     from mlheatmap.core.deg import compute_deg
 
     # Build sample indices from groups
@@ -117,6 +158,29 @@ async def deg_analysis(
                     session.sample_names.index(s)
                 )
 
+    # Validate both groups survived exclusion and have enough samples
+    if len(sample_groups) != 2:
+        missing = [g for g in session.groups if g not in sample_groups]
+        return JSONResponse(
+            {"error": f"Group(s) {missing} have no valid samples after exclusion"},
+            status_code=400,
+        )
+    for group_name, indices in sample_groups.items():
+        if len(indices) < 2:
+            return JSONResponse(
+                {"error": f"Group '{group_name}' has only {len(indices)} sample(s) after exclusion — need ≥ 2"},
+                status_code=400,
+            )
+
+    # Use size-factor-normalized counts for log2FC when using DESeq2-VST
+    # (raw counts ignore library-size differences; VST is non-linear)
+    sf_counts = None
+    if session.norm_method == "deseq2" and session.size_factors is not None:
+        df = session.mapped_counts if session.mapped_counts is not None else session.raw_counts
+        if df is not None:
+            raw = df.values.astype(float)
+            sf_counts = raw / session.size_factors[np.newaxis, :]
+
     result = compute_deg(
         expression=session.normalized,
         gene_names=session.gene_names,
@@ -125,6 +189,7 @@ async def deg_analysis(
         log2fc_threshold=log2fc_threshold,
         pvalue_threshold=pvalue_threshold,
         use_raw_pvalue=use_raw_pvalue,
+        raw_counts=sf_counts,
     )
 
     # Store for heatmap use

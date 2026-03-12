@@ -71,6 +71,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_id: sessionId, samples }),
         });
+        if (!res.ok) throw new Error((await res.json()).error || 'Include failed');
         return res.json();
     },
 

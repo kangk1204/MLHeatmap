@@ -87,6 +87,24 @@ const Biomarker = {
             return;
         }
 
+        // Validate inputs before calling API
+        const nTopGenes = parseInt(document.getElementById('n-top-genes').value);
+        const nEstimators = parseInt(document.getElementById('n-estimators').value);
+        const cvFolds = parseInt(document.getElementById('cv-folds').value);
+
+        if (isNaN(nTopGenes) || nTopGenes < 5 || nTopGenes > 200) {
+            App.showToast('Top Genes must be between 5 and 200', 'error');
+            return;
+        }
+        if (isNaN(nEstimators) || nEstimators < 50 || nEstimators > 2000) {
+            App.showToast('Trees/Rounds must be between 50 and 2000', 'error');
+            return;
+        }
+        if (isNaN(cvFolds) || cvFolds < 2 || cvFolds > 10) {
+            App.showToast('CV Folds must be between 2 and 10', 'error');
+            return;
+        }
+
         const btn = document.getElementById('btn-run-biomarker');
         btn.disabled = true;
 
@@ -102,20 +120,31 @@ const Biomarker = {
         const modelSelect = document.getElementById('model-select');
         const panelSelect = document.getElementById('panel-method-select');
         const es = API.biomarkerStream(App.state.sessionId, {
-            nTopGenes: parseInt(document.getElementById('n-top-genes').value),
-            nEstimators: parseInt(document.getElementById('n-estimators').value),
-            cvFolds: parseInt(document.getElementById('cv-folds').value),
+            nTopGenes,
+            nEstimators,
+            cvFolds,
             model: modelSelect ? modelSelect.value : 'rf',
             panelMethod: panelSelect ? panelSelect.value : 'forward',
         });
 
+        let gotResponse = false;
+        const finishWithError = (message) => {
+            gotResponse = true;
+            es.close();
+            btn.disabled = false;
+            progressEl.classList.add('hidden');
+            App.showToast(message || 'Analysis failed', 'error');
+        };
+
         es.addEventListener('progress', (e) => {
+            gotResponse = true;
             const data = JSON.parse(e.data);
             progressFill.style.width = data.pct + '%';
             progressText.textContent = data.msg;
         });
 
         es.addEventListener('complete', (e) => {
+            gotResponse = true;
             es.close();
             btn.disabled = false;
             progressEl.classList.add('hidden');
@@ -127,16 +156,12 @@ const Biomarker = {
             App.showToast('Analysis complete — review results below', 'success');
         });
 
-        es.addEventListener('error', (e) => {
-            es.close();
-            btn.disabled = false;
-            progressEl.classList.add('hidden');
-
-            if (e.data) {
+        es.addEventListener('app_error', (e) => {
+            try {
                 const data = JSON.parse(e.data);
-                App.showToast(data.detail || 'Analysis failed', 'error');
-            } else {
-                App.showToast('Connection lost', 'error');
+                finishWithError(data.detail || 'Analysis failed');
+            } catch {
+                finishWithError('Analysis failed');
             }
         });
 
@@ -144,7 +169,10 @@ const Biomarker = {
             es.close();
             btn.disabled = false;
             progressEl.classList.add('hidden');
-            App.showToast('Analysis failed', 'error');
+            if (!gotResponse) {
+                // Never received any SSE event — likely a 4xx/5xx HTTP error
+                App.showToast('Analysis failed — check parameters and try again', 'error');
+            }
         };
     },
 
@@ -160,6 +188,18 @@ const Biomarker = {
         badge.style.background = `${color}20`;
         badge.style.color = color;
         badge.style.border = `1px solid ${color}40`;
+
+        // ROC evaluation label
+        const rocTag = document.getElementById('roc-eval-tag');
+        if (rocTag) {
+            if (data.roc_evaluation === 'out_of_fold') {
+                rocTag.textContent = 'Out-of-Fold';
+                rocTag.className = 'eval-tag oof';
+            } else {
+                rocTag.textContent = 'CV Re-eval';
+                rocTag.className = 'eval-tag internal';
+            }
+        }
 
         // SHAP plot
         this.plotShap(data);
@@ -326,6 +366,19 @@ const Biomarker = {
         badge.style.cssText = `background:${color}15;border:1px solid ${color}40;color:${color}`;
         badge.textContent = `Best AUC: ${aucPct}% with ${combo.n_genes} gene${combo.n_genes > 1 ? 's' : ''}`;
         summary.appendChild(badge);
+
+        // Panel AUC note — distinguish from the out-of-fold ROC above
+        const noteEl = document.getElementById('panel-auc-note');
+        if (noteEl) {
+            if (combo.auc_note === 'cv_model_selection') {
+                noteEl.textContent = 'Panel AUC is an internal cross-validation estimate used for gene selection. '
+                    + 'It may be optimistic compared to the out-of-fold ROC above. '
+                    + 'For publication, report the ROC curve AUC as the primary performance metric.';
+                noteEl.classList.remove('hidden');
+            } else {
+                noteEl.classList.add('hidden');
+            }
+        }
 
         // AUC vs #genes curve (with SHAP rank in tooltip)
         const curve = combo.auc_curve;
@@ -508,14 +561,40 @@ const Biomarker = {
         const down = results.filter(r => r.direction === 'down');
         const ns = results.filter(r => r.direction === 'ns');
 
+        // Adaptive Y-cap: prevent extreme -log10(p) values from
+        // squashing all points at the top of the plot.
+        // Strategy: find the "useful" range where most differentiation
+        // occurs, then cap above it.  Points above the cap are shown as
+        // diamond markers at the cap line (hover still shows true value).
+        const allNlpRaw = results.map(r => r.neg_log10_p);
+        const maxRawNlp = Math.max(...allNlpRaw);
+        const sortedNlp = [...allNlpRaw].sort((a, b) => a - b);
+        const n = sortedNlp.length;
+        const p50 = sortedNlp[Math.floor(n * 0.50)] || 1;
+        const p90 = sortedNlp[Math.floor(n * 0.90)] || 1;
+        // Base cap: focus on spreading out the majority of data
+        const baseCap = Math.max(negLog10PThresh * 3, p90 * 1.8, 10);
+        // Hard scientific ceiling — beyond ~50, "very significant" is enough
+        const adaptiveCap = Math.min(baseCap, 50);
+        const needsCap = maxRawNlp > adaptiveCap * 1.05;
+
+        // Clamp displayed y-values; keep originals in hover
+        const clampY = v => Math.min(v, adaptiveCap);
+
         const makeTrace = (subset, name, color, size, opacity) => ({
             x: subset.map(r => r.log2fc),
-            y: subset.map(r => r.neg_log10_p),
+            y: subset.map(r => clampY(r.neg_log10_p)),
             text: subset.map(r => r.gene),
+            customdata: subset.map(r => r.neg_log10_p),
             mode: 'markers',
             name: `${name} (${subset.length})`,
-            marker: { color, size, opacity },
-            hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{y:.2f}<extra></extra>`,
+            marker: {
+                color,
+                size: subset.map(r => r.neg_log10_p > adaptiveCap ? size + 2 : size),
+                opacity,
+                symbol: subset.map(r => r.neg_log10_p > adaptiveCap ? 'diamond' : 'circle'),
+            },
+            hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{customdata:.2f}<extra></extra>`,
         });
 
         const traces = [
@@ -533,7 +612,7 @@ const Biomarker = {
         if (sigGenes.length > 0) {
             traces.push({
                 x: sigGenes.map(r => r.log2fc),
-                y: sigGenes.map(r => r.neg_log10_p),
+                y: sigGenes.map(r => clampY(r.neg_log10_p)),
                 text: sigGenes.map(r => r.gene),
                 mode: 'text',
                 textposition: 'top center',
@@ -546,6 +625,10 @@ const Biomarker = {
         // Compute x range
         const allFc = results.map(r => r.log2fc);
         const maxFc = Math.max(Math.abs(Math.min(...allFc)), Math.abs(Math.max(...allFc)), fcThresh + 1);
+
+        // Compute y range with padding for top gene labels
+        const maxNlp = needsCap ? adaptiveCap : Math.max(...allNlpRaw, negLog10PThresh + 1);
+        const yPadding = maxNlp * 0.12;  // 12% padding for text labels
 
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
@@ -561,6 +644,7 @@ const Biomarker = {
                 title: { text: `-log10(${pLabel})`, font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
+                range: [-0.5, maxNlp + yPadding],
             },
             legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.3)', font: { size: 10 } },
             margin: { l: 60, r: 20, t: 10, b: 60 },
@@ -570,7 +654,18 @@ const Biomarker = {
                 { type: 'line', x0: -fcThresh, x1: -fcThresh, y0: 0, y1: 1, yref: 'paper', line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
                 // Horizontal p-value threshold
                 { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: negLog10PThresh, y1: negLog10PThresh, line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
+                // Y-axis cap indicator (only when capping is active)
+                ...(needsCap ? [{
+                    type: 'line', x0: 0, x1: 1, xref: 'paper',
+                    y0: adaptiveCap, y1: adaptiveCap,
+                    line: { color: 'rgba(251,191,36,0.3)', dash: 'dot', width: 1 },
+                }] : []),
             ],
+            annotations: needsCap ? [{
+                x: 1, xref: 'paper', y: adaptiveCap, yanchor: 'bottom',
+                text: `capped (\u25C6 = higher)`,
+                showarrow: false, font: { size: 9, color: 'rgba(251,191,36,0.6)' },
+            }] : [],
         };
 
         Plotly.newPlot('volcano-plot', traces, layout, {

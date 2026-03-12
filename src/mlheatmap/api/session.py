@@ -16,6 +16,7 @@ class Session:
     mapped_counts: Optional[pd.DataFrame] = None
     normalized: Optional[np.ndarray] = None
     norm_method: str = ""
+    size_factors: Optional[np.ndarray] = None
     gene_names: list = field(default_factory=list)
     sample_names: list = field(default_factory=list)
     groups: dict = field(default_factory=dict)
@@ -25,6 +26,7 @@ class Session:
     biomarker_results: Optional[dict] = None
     deg_results: Optional[dict] = None
     heatmap_data: Optional[dict] = None
+    heatmap_color_scale: str = "RdBu_r"
     created_at: float = field(default_factory=time.time)
 
 

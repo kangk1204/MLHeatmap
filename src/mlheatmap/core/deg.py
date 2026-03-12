@@ -16,6 +16,7 @@ def compute_deg(
     log2fc_threshold: float = 1.0,
     pvalue_threshold: float = 0.05,
     use_raw_pvalue: bool = False,
+    raw_counts: np.ndarray = None,
 ) -> dict:
     """Run DEG analysis between groups.
 
@@ -23,6 +24,7 @@ def compute_deg(
     ----------
     expression : np.ndarray
         Normalized expression matrix (genes × samples).
+        Used for the statistical test.
     gene_names : list
         Gene symbol list matching rows of expression.
     sample_groups : dict
@@ -35,6 +37,12 @@ def compute_deg(
         P-value threshold for significance (default 0.05).
     use_raw_pvalue : bool
         If True, use raw p-value instead of FDR-adjusted for significance.
+    raw_counts : np.ndarray, optional
+        Library-size-normalized count matrix (genes × samples), same
+        shape as expression. When provided, log2FC is computed from
+        these counts as log2(mean+1) for proper fold change
+        interpretation (important when expression is VST-transformed).
+        For DESeq2 mode, pass counts / size_factors (not raw counts).
 
     Returns
     -------
@@ -61,14 +69,23 @@ def compute_deg(
         expr_g1 = np.nan_to_num(expr_g1, nan=0.0, posinf=0.0, neginf=0.0)
         expr_g2 = np.nan_to_num(expr_g2, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # Mean expression per group
+        # Mean expression per group (normalized, for reporting)
         mean_g1 = float(np.mean(expr_g1))
         mean_g2 = float(np.mean(expr_g2))
 
-        # log2 Fold Change: group1 vs group2
-        # If data is already log-transformed, difference = log2FC
-        # If not, compute from raw means with pseudocount
-        log2fc = mean_g1 - mean_g2
+        # log2 Fold Change: computed from raw counts when available
+        # (ensures proper fold change even with VST-transformed data)
+        if raw_counts is not None:
+            raw_g1 = np.nan_to_num(raw_counts[i, idx_g1].astype(np.float64),
+                                   nan=0.0, posinf=0.0, neginf=0.0)
+            raw_g2 = np.nan_to_num(raw_counts[i, idx_g2].astype(np.float64),
+                                   nan=0.0, posinf=0.0, neginf=0.0)
+            mean_raw_g1 = float(np.mean(raw_g1))
+            mean_raw_g2 = float(np.mean(raw_g2))
+            log2fc = float(np.log2(mean_raw_g1 + 1) - np.log2(mean_raw_g2 + 1))
+        else:
+            # For log2/TPM normalizations, difference ≈ log2FC directly
+            log2fc = mean_g1 - mean_g2
         if not np.isfinite(log2fc):
             log2fc = 0.0
 

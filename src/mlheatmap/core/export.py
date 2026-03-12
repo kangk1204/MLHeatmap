@@ -24,11 +24,12 @@ def export_heatmap_image(session, fmt="png", dpi=300) -> bytes:
     if not data:
         raise ValueError("No heatmap data. Generate heatmap first.")
 
+    cs = getattr(session, "heatmap_color_scale", "RdBu_r") or "RdBu_r"
     fig = go.Figure(data=go.Heatmap(
         z=data["z"],
         x=data["x"],
         y=data["y"],
-        colorscale="RdBu_r",
+        colorscale=cs,
         zmid=0,
         colorbar=dict(title="Z-score"),
     ))
@@ -111,7 +112,7 @@ def export_auc_image(session, fmt="png", dpi=300) -> bytes:
     ))
 
     fig.update_layout(
-        title="ROC Curve (Cross-Validated)",
+        title="ROC Curve (Out-of-Fold)",
         xaxis_title="False Positive Rate",
         yaxis_title="True Positive Rate",
         width=700,

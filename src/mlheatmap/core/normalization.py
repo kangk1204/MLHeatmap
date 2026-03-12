@@ -3,14 +3,16 @@
 import numpy as np
 
 
-def deseq2_normalize(counts: np.ndarray) -> np.ndarray:
+def deseq2_normalize(counts: np.ndarray, return_size_factors: bool = False):
     """DESeq2-like median-of-ratios normalization + VST.
 
     Args:
         counts: Raw count matrix (genes x samples)
+        return_size_factors: If True, return (vst, size_factors) tuple.
 
     Returns:
-        VST-transformed matrix (genes x samples)
+        VST-transformed matrix (genes x samples), or
+        (vst, size_factors) if return_size_factors=True.
     """
     counts = counts.astype(np.float64)
 
@@ -35,7 +37,11 @@ def deseq2_normalize(counts: np.ndarray) -> np.ndarray:
     normalized = counts / size_factors[np.newaxis, :]
 
     # Step 5: VST approximation
-    return _vst_transform(normalized)
+    vst = _vst_transform(normalized)
+
+    if return_size_factors:
+        return vst, size_factors
+    return vst
 
 
 def _vst_transform(normalized: np.ndarray) -> np.ndarray:
