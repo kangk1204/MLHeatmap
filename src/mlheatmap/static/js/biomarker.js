@@ -2,6 +2,12 @@
 const Biomarker = {
     _activeTab: 'ml',
 
+    _escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str ?? '';
+        return div.innerHTML;
+    },
+
     init() {
         document.getElementById('btn-run-biomarker').addEventListener('click', () => this.run());
         document.getElementById('btn-to-export').addEventListener('click', () => {
@@ -46,6 +52,29 @@ const Biomarker = {
         // Show/hide results
         document.getElementById('biomarker-results').classList.toggle('hidden', tab !== 'ml' || !App.state.biomarkerResults);
         document.getElementById('deg-results').classList.toggle('hidden', tab !== 'deg' || !App.state.degResults);
+        // Refresh reference group dropdown when switching to DEG tab
+        if (tab === 'deg') this._populateRefGroupDropdown();
+    },
+
+    _populateRefGroupDropdown() {
+        const sel = document.getElementById('deg-reference-group');
+        if (!sel) return;
+        const groups = Object.keys(App.state.groups || {});
+        const prev = sel.value;
+        sel.innerHTML = '';
+        groups.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g;
+            opt.textContent = g;
+            sel.appendChild(opt);
+        });
+        // Restore previous selection if still valid
+        if (prev && groups.includes(prev)) {
+            sel.value = prev;
+        } else if (groups.length > 1) {
+            // Default: second group as reference (common convention: control is often second)
+            sel.value = groups[1];
+        }
     },
 
     _updateModelParams() {
@@ -505,17 +534,21 @@ const Biomarker = {
 
         try {
             const useRaw = document.getElementById('deg-pval-type').value === 'raw';
+            const refGroup = document.getElementById('deg-reference-group')?.value || '';
             const data = await API.runDeg(App.state.sessionId, {
                 method: document.getElementById('deg-method-select').value,
                 log2fcThreshold: parseFloat(document.getElementById('deg-fc-threshold').value),
                 pvalueThreshold: parseFloat(document.getElementById('deg-pval-threshold').value),
                 useRawPvalue: useRaw,
+                referenceGroup: refGroup,
             });
 
             App.state.degResults = data;
             this.showDegResults(data);
             App.markStepCompleted('biomarker');
-            App.showToast(`DEG complete: ${data.summary.n_up} up, ${data.summary.n_down} down`, 'success');
+            const cg = data.comparison_group || '';
+            const toastUp = cg ? `${data.summary.n_up} up in ${cg}` : `${data.summary.n_up} up`;
+            App.showToast(`DEG complete: ${toastUp}, ${data.summary.n_down} down`, 'success');
         } catch (err) {
             App.showToast(err.message, 'error');
         } finally {
@@ -531,21 +564,43 @@ const Biomarker = {
         const isRawP = data.pvalue_type === 'raw';
         const pLabel = isRawP ? 'Raw P-value' : 'FDR';
         const cutoff = data.thresholds.pvalue;
+        const comp = data.comparison_group || '';
+        const ref = data.reference_group || '';
+        const upLabel = comp ? `Up in ${comp}` : 'Up-regulated';
+        const downLabel = comp ? `Down in ${comp}` : 'Down-regulated';
 
         // Summary cards
         const summaryEl = document.getElementById('deg-summary');
-        summaryEl.innerHTML = `
-            <div class="deg-stat up"><span class="count">${data.summary.n_up}</span><span class="label">Up-regulated</span></div>
-            <div class="deg-stat down"><span class="count">${data.summary.n_down}</span><span class="label">Down-regulated</span></div>
-            <div class="deg-stat ns"><span class="count">${data.summary.n_not_significant}</span><span class="label">Not Significant</span></div>
-            <div class="deg-stat info"><span class="count" style="font-size:0.85rem">${pLabel} < ${cutoff}</span><span class="label">Cutoff</span></div>
-        `;
+        summaryEl.innerHTML = '';
+        const cards = [
+            { className: 'deg-stat up', count: String(data.summary.n_up), label: upLabel },
+            { className: 'deg-stat down', count: String(data.summary.n_down), label: downLabel },
+            { className: 'deg-stat ns', count: String(data.summary.n_not_significant), label: 'Not Significant' },
+            { className: 'deg-stat info', count: `${pLabel} < ${cutoff}`, label: `vs ${ref} (ref)`, small: true },
+        ];
+        cards.forEach(card => {
+            const wrapper = document.createElement('div');
+            wrapper.className = card.className;
+
+            const count = document.createElement('span');
+            count.className = 'count';
+            if (card.small) count.style.fontSize = '0.85rem';
+            count.textContent = card.count;
+
+            const label = document.createElement('span');
+            label.className = 'label';
+            label.textContent = card.label;
+
+            wrapper.appendChild(count);
+            wrapper.appendChild(label);
+            summaryEl.appendChild(wrapper);
+        });
 
         // Volcano plot
         this.plotVolcano(data);
 
         // DEG table
-        this.populateDegTable(data.results);
+        this.populateDegTable(data.results, comp);
     },
 
     plotVolcano(data) {
@@ -555,6 +610,11 @@ const Biomarker = {
         const negLog10PThresh = -Math.log10(pThresh);
         const isRawP = data.pvalue_type === 'raw';
         const pLabel = isRawP ? 'P-value' : 'FDR';
+        const comp = data.comparison_group || '';
+        const ref = data.reference_group || '';
+        const compSafe = this._escapeHtml(comp);
+        const refSafe = this._escapeHtml(ref);
+        const fcAxisLabel = (compSafe && refSafe) ? `log2FC (${compSafe} / ${refSafe})` : 'log2 Fold Change';
 
         // Separate by direction
         const up = results.filter(r => r.direction === 'up');
@@ -597,10 +657,12 @@ const Biomarker = {
             hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{customdata:.2f}<extra></extra>`,
         });
 
+        const upName = compSafe ? `Up in ${compSafe}` : 'Up';
+        const downName = compSafe ? `Down in ${compSafe}` : 'Down';
         const traces = [
             makeTrace(ns, 'NS', '#6b7280', 4, 0.45),
-            makeTrace(up, 'Up', '#ef4444', 7, 0.85),
-            makeTrace(down, 'Down', '#3b82f6', 7, 0.85),
+            makeTrace(up, upName, '#ef4444', 7, 0.85),
+            makeTrace(down, downName, '#3b82f6', 7, 0.85),
         ];
 
         // Top gene labels
@@ -635,7 +697,7 @@ const Biomarker = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 11 },
             xaxis: {
-                title: { text: 'log2 Fold Change', font: { size: 12 } },
+                title: { text: fcAxisLabel, font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
                 range: [-maxFc * 1.1, maxFc * 1.1],
@@ -673,7 +735,7 @@ const Biomarker = {
         });
     },
 
-    populateDegTable(results) {
+    populateDegTable(results, compGroup) {
         const tbody = document.querySelector('#deg-table tbody');
         tbody.innerHTML = '';
 
@@ -684,16 +746,34 @@ const Biomarker = {
             sig.push(...results.slice(0, 50));
         }
 
+        const upText = compGroup ? `▲ ${compGroup}` : '▲ Up';
+        const downText = compGroup ? `▼ ${compGroup}` : '▼ Down';
         sig.forEach((gene, i) => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td style="font-weight:600;color:var(--text-accent)">${i + 1}</td>
-                <td style="font-weight:600">${gene.gene}</td>
-                <td>${gene.log2fc.toFixed(3)}</td>
-                <td>${gene.pvalue.toExponential(2)}</td>
-                <td>${gene.adj_pvalue.toExponential(2)}</td>
-                <td class="dir-${gene.direction}">${gene.direction === 'up' ? '▲ Up' : gene.direction === 'down' ? '▼ Down' : '— NS'}</td>
-            `;
+            const dirText = gene.direction === 'up' ? upText : gene.direction === 'down' ? downText : '— NS';
+
+            const tdRank = document.createElement('td');
+            tdRank.style.cssText = 'font-weight:600;color:var(--text-accent)';
+            tdRank.textContent = String(i + 1);
+
+            const tdGene = document.createElement('td');
+            tdGene.style.fontWeight = '600';
+            tdGene.textContent = gene.gene;
+
+            const tdLog2fc = document.createElement('td');
+            tdLog2fc.textContent = gene.log2fc.toFixed(3);
+
+            const tdP = document.createElement('td');
+            tdP.textContent = gene.pvalue.toExponential(2);
+
+            const tdAdjP = document.createElement('td');
+            tdAdjP.textContent = gene.adj_pvalue.toExponential(2);
+
+            const tdDir = document.createElement('td');
+            tdDir.className = `dir-${gene.direction}`;
+            tdDir.textContent = dirText;
+
+            [tdRank, tdGene, tdLog2fc, tdP, tdAdjP, tdDir].forEach(td => tr.appendChild(td));
             tbody.appendChild(tr);
         });
     },

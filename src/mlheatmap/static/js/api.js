@@ -131,6 +131,9 @@ const API = {
             pvalue_threshold: opts.pvalueThreshold || 0.05,
             use_raw_pvalue: opts.useRawPvalue || false,
         });
+        if (opts.referenceGroup) {
+            params.set('reference_group', opts.referenceGroup);
+        }
         const res = await fetch(`${this.baseUrl}/biomarker/deg?${params}`);
         if (!res.ok) throw new Error((await res.json()).error || 'DEG analysis failed');
         return res.json();

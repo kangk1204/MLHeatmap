@@ -7,6 +7,39 @@ from fastapi.testclient import TestClient
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 
+def _prepare_deg_session(client):
+    """Upload, map, normalize, and split into two groups for DEG tests."""
+    path = os.path.join(DATA_DIR, "small_quick_test.csv")
+    with open(path, "rb") as f:
+        r = client.post("/api/v1/upload", files={"file": ("test.csv", f, "text/csv")})
+    assert r.status_code == 200
+    sid = r.json()["session_id"]
+    samples = r.json()["sample_names"]
+
+    r = client.post("/api/v1/gene-mapping", json={
+        "session_id": sid,
+        "species": "human",
+        "id_type": "auto",
+    })
+    assert r.status_code == 200
+
+    r = client.post("/api/v1/normalize", json={
+        "session_id": sid,
+        "method": "log2",
+    })
+    assert r.status_code == 200
+
+    half = len(samples) // 2
+    groups = {"Control": samples[:half], "Case": samples[half:]}
+    r = client.post("/api/v1/groups", json={
+        "session_id": sid,
+        "groups": groups,
+    })
+    assert r.status_code == 200
+
+    return sid, samples, groups
+
+
 @pytest.fixture(scope="module")
 def client():
     from mlheatmap.server import create_app
@@ -228,6 +261,37 @@ class TestHeatmap:
     def test_heatmap_no_data(self, client):
         r = client.get("/api/v1/heatmap?session_id=nonexistent&top_n=50")
         assert r.status_code == 404
+
+
+class TestDEG:
+    def test_deg_reference_group_reorders_labels(self, client):
+        sid, _, _ = _prepare_deg_session(client)
+
+        r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["reference_group"] == "Control"
+        assert data["comparison_group"] == "Case"
+
+    def test_deg_reference_group_invalid_name(self, client):
+        sid, _, _ = _prepare_deg_session(client)
+
+        r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Unknown")
+        assert r.status_code == 400
+        assert "Unknown reference group" in r.json()["error"]
+
+    def test_deg_reference_group_missing_after_exclusion_returns_400(self, client):
+        sid, _, groups = _prepare_deg_session(client)
+
+        r = client.post("/api/v1/groups/exclude", json={
+            "session_id": sid,
+            "samples": groups["Case"],
+        })
+        assert r.status_code == 200
+
+        r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
+        assert r.status_code == 400
+        assert "no valid samples after exclusion" in r.json()["error"]
 
 
 # ──────────────────────────────────────────────

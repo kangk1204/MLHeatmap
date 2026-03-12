@@ -386,6 +386,12 @@
                 <!-- DEG Controls -->
                 <div class="biomarker-controls glass-card hidden" id="deg-controls">
                     <div class="control-group">
+                        <label>Reference (Control) Group</label>
+                        <select id="deg-reference-group" class="select-input">
+                            <!-- Populated dynamically from App.state.groups -->
+                        </select>
+                    </div>
+                    <div class="control-group">
                         <label>Statistical Test</label>
                         <select id="deg-method-select" class="select-input">
                             <option value="wilcoxon">Wilcoxon Rank-Sum</option>

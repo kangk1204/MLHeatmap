@@ -128,6 +128,7 @@ async def deg_analysis(
     log2fc_threshold: float = Query(1.0, ge=0),
     pvalue_threshold: float = Query(0.05, ge=0, le=1),
     use_raw_pvalue: bool = Query(False),
+    reference_group: str = Query(None),
 ):
     """Run DEG analysis between groups."""
     session = request.app.state.sessions.get(session_id)
@@ -172,6 +173,21 @@ async def deg_analysis(
                 status_code=400,
             )
 
+    # Reorder so that reference_group is second (denominator in log2FC).
+    # Convention: log2FC = log2(comparison) - log2(reference)
+    if reference_group:
+        if reference_group not in sample_groups:
+            valid = ", ".join(sample_groups.keys())
+            return JSONResponse(
+                {"error": f"Unknown reference group '{reference_group}'. Choose one of: {valid}"},
+                status_code=400,
+            )
+        comparison = next(g for g in sample_groups if g != reference_group)
+        sample_groups = {
+            comparison: sample_groups[comparison],
+            reference_group: sample_groups[reference_group],
+        }
+
     # Use size-factor-normalized counts for log2FC when using DESeq2-VST
     # (raw counts ignore library-size differences; VST is non-linear)
     sf_counts = None
@@ -211,6 +227,8 @@ async def deg_analysis(
         "results": all_results,
         "summary": result["summary"],
         "group_names": result["group_names"],
+        "comparison_group": result["comparison_group"],
+        "reference_group": result["reference_group"],
         "thresholds": result["thresholds"],
         "method": result["method"],
         "pvalue_type": result.get("pvalue_type", "fdr"),

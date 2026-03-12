@@ -144,6 +144,8 @@ def export_volcano_image(session, fmt="png", dpi=300) -> bytes:
     neg_log10_thresh = -np.log10(p_thresh) if p_thresh > 0 else 2
     pvalue_type = deg.get("pvalue_type", "fdr")
     p_label = "P-value" if pvalue_type == "raw" else "FDR"
+    comp_group = deg.get("comparison_group", "")
+    ref_group = deg.get("reference_group", "")
 
     # Separate by direction
     up = [r for r in results if r["direction"] == "up"]
@@ -169,20 +171,22 @@ def export_volcano_image(session, fmt="png", dpi=300) -> bytes:
             label=f"NS ({len(ns):,})", rasterized=True, zorder=1,
         )
     # Down points (blue)
+    down_label = f"Down in {comp_group} ({len(down)})" if comp_group else f"Down ({len(down)})"
     if down:
         ax.scatter(
             [r["log2fc"] for r in down],
             [r["neg_log10_p"] for r in down],
             s=30, c="#3b82f6", alpha=0.8, edgecolors="none",
-            label=f"Down ({len(down)})", zorder=2,
+            label=down_label, zorder=2,
         )
     # Up points (red)
+    up_label = f"Up in {comp_group} ({len(up)})" if comp_group else f"Up ({len(up)})"
     if up:
         ax.scatter(
             [r["log2fc"] for r in up],
             [r["neg_log10_p"] for r in up],
             s=30, c="#ef4444", alpha=0.8, edgecolors="none",
-            label=f"Up ({len(up)})", zorder=2,
+            label=up_label, zorder=2,
         )
 
     # Top gene labels (up to 5 per direction, spread vertically to reduce overlap)
@@ -214,7 +218,8 @@ def export_volcano_image(session, fmt="png", dpi=300) -> bytes:
     ax.axhline(neg_log10_thresh, color="#475569", linestyle="--", linewidth=0.8, alpha=0.6)
 
     # Styling
-    ax.set_xlabel("log₂ Fold Change", fontsize=12, color=TEXT_SEC, labelpad=8)
+    fc_label = f"log2FC ({comp_group} / {ref_group})" if comp_group and ref_group else "log2 Fold Change"
+    ax.set_xlabel(fc_label, fontsize=12, color=TEXT_SEC, labelpad=8)
     ax.set_ylabel(f"-log₁₀({p_label})", fontsize=12, color=TEXT_SEC, labelpad=8)
     ax.set_xlim(-max_fc * 1.15, max_fc * 1.15)
     ax.tick_params(colors=TEXT_SEC, labelsize=9)
@@ -287,6 +292,14 @@ def export_results_excel(session) -> bytes:
                          "mean_g1", "mean_g2", "neg_log10_p", "gene_idx"]
             col_order = [c for c in col_order if c in deg_df.columns]
             deg_df = deg_df[col_order]
+            # Rename mean columns with group names for clarity
+            cg = session.deg_results.get("comparison_group", "")
+            rg = session.deg_results.get("reference_group", "")
+            if cg and rg:
+                deg_df = deg_df.rename(columns={
+                    "mean_g1": f"mean_{cg}",
+                    "mean_g2": f"mean_{rg}",
+                })
             deg_df.to_excel(writer, sheet_name="DEG Results", index=False)
 
         # Sheet 4: Group assignments
