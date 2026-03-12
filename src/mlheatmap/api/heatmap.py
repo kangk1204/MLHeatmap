@@ -253,6 +253,8 @@ async def get_deg_heatmap(
     response["groups"] = session.groups
     response["color_scale"] = color_scale
     response["method"] = session.deg_results.get("method", "wilcoxon")
+    response["comparison_group"] = session.deg_results.get("comparison_group", "")
+    response["reference_group"] = session.deg_results.get("reference_group", "")
 
     # Reorder DEG values to match clustered y order
     fc_map = dict(zip(found_symbols, found_log2fc))

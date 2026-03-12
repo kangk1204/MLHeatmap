@@ -50,6 +50,8 @@ def compute_deg(
         - results: list of per-gene dicts sorted by the chosen p-value
         - summary: dict with counts of up/down/not significant
         - thresholds: dict with fc/pvalue cutoffs used
+        - comparison_group: str, group_names[0] — numerator in log2FC
+        - reference_group: str, group_names[1] — denominator in log2FC
     """
     group_names = list(sample_groups.keys())
     if len(group_names) != 2:
@@ -159,6 +161,8 @@ def compute_deg(
             "n_total": n_genes,
         },
         "group_names": group_names,
+        "comparison_group": group_names[0],
+        "reference_group": group_names[1],
         "thresholds": {
             "log2fc": log2fc_threshold,
             "pvalue": pvalue_threshold,
