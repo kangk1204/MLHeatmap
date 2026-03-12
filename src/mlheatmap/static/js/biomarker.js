@@ -21,6 +21,15 @@ const Biomarker = {
             tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
         });
 
+        // P-value type selector — update label dynamically
+        const pvalType = document.getElementById('deg-pval-type');
+        if (pvalType) {
+            pvalType.addEventListener('change', () => {
+                const label = document.getElementById('deg-pval-label');
+                if (label) label.textContent = pvalType.value === 'raw' ? 'P-value Threshold' : 'FDR Threshold';
+            });
+        }
+
         // Model-specific parameter visibility
         const modelSelect = document.getElementById('model-select');
         if (modelSelect) {
@@ -442,10 +451,12 @@ const Biomarker = {
         App.showLoading('Running DEG analysis...');
 
         try {
+            const useRaw = document.getElementById('deg-pval-type').value === 'raw';
             const data = await API.runDeg(App.state.sessionId, {
                 method: document.getElementById('deg-method-select').value,
                 log2fcThreshold: parseFloat(document.getElementById('deg-fc-threshold').value),
                 pvalueThreshold: parseFloat(document.getElementById('deg-pval-threshold').value),
+                useRawPvalue: useRaw,
             });
 
             App.state.degResults = data;
@@ -464,12 +475,17 @@ const Biomarker = {
         document.getElementById('deg-results').classList.remove('hidden');
         document.getElementById('biomarker-results').classList.add('hidden');
 
+        const isRawP = data.pvalue_type === 'raw';
+        const pLabel = isRawP ? 'Raw P-value' : 'FDR';
+        const cutoff = data.thresholds.pvalue;
+
         // Summary cards
         const summaryEl = document.getElementById('deg-summary');
         summaryEl.innerHTML = `
             <div class="deg-stat up"><span class="count">${data.summary.n_up}</span><span class="label">Up-regulated</span></div>
             <div class="deg-stat down"><span class="count">${data.summary.n_down}</span><span class="label">Down-regulated</span></div>
             <div class="deg-stat ns"><span class="count">${data.summary.n_not_significant}</span><span class="label">Not Significant</span></div>
+            <div class="deg-stat info"><span class="count" style="font-size:0.85rem">${pLabel} < ${cutoff}</span><span class="label">Cutoff</span></div>
         `;
 
         // Volcano plot
@@ -484,6 +500,8 @@ const Biomarker = {
         const fcThresh = data.thresholds.log2fc;
         const pThresh = data.thresholds.pvalue;
         const negLog10PThresh = -Math.log10(pThresh);
+        const isRawP = data.pvalue_type === 'raw';
+        const pLabel = isRawP ? 'P-value' : 'FDR';
 
         // Separate by direction
         const up = results.filter(r => r.direction === 'up');
@@ -497,7 +515,7 @@ const Biomarker = {
             mode: 'markers',
             name: `${name} (${subset.length})`,
             marker: { color, size: 5, opacity: 0.7 },
-            hovertemplate: '<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(FDR): %{y:.2f}<extra></extra>',
+            hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{y:.2f}<extra></extra>`,
         });
 
         const traces = [
@@ -507,7 +525,11 @@ const Biomarker = {
         ];
 
         // Top gene labels
-        const sigGenes = [...up, ...down].sort((a, b) => a.adj_pvalue - b.adj_pvalue).slice(0, 10);
+        const sigGenes = [...up, ...down].sort((a, b) => {
+            const pa = isRawP ? a.pvalue : a.adj_pvalue;
+            const pb = isRawP ? b.pvalue : b.adj_pvalue;
+            return pa - pb;
+        }).slice(0, 10);
         if (sigGenes.length > 0) {
             traces.push({
                 x: sigGenes.map(r => r.log2fc),
@@ -536,7 +558,7 @@ const Biomarker = {
                 range: [-maxFc * 1.1, maxFc * 1.1],
             },
             yaxis: {
-                title: { text: '-log10(FDR)', font: { size: 12 } },
+                title: { text: `-log10(${pLabel})`, font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
             },

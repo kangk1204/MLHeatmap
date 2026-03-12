@@ -1228,6 +1228,11 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid rgba(100, 116, 139, 0.3);
     color: #94a3b8;
 }
+.deg-stat.info {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
 .deg-stat .count { font-size: 24px; font-weight: 700; display: block; }
 .deg-stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 

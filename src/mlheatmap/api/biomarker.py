@@ -94,6 +94,7 @@ async def deg_analysis(
     method: str = Query("wilcoxon"),
     log2fc_threshold: float = Query(1.0, ge=0),
     pvalue_threshold: float = Query(0.05, ge=0, le=1),
+    use_raw_pvalue: bool = Query(False),
 ):
     """Run DEG analysis between groups."""
     session = request.app.state.sessions.get(session_id)
@@ -123,6 +124,7 @@ async def deg_analysis(
         method=method,
         log2fc_threshold=log2fc_threshold,
         pvalue_threshold=pvalue_threshold,
+        use_raw_pvalue=use_raw_pvalue,
     )
 
     # Store for heatmap use
@@ -143,6 +145,7 @@ async def deg_analysis(
         "group_names": result["group_names"],
         "thresholds": result["thresholds"],
         "method": result["method"],
+        "pvalue_type": result.get("pvalue_type", "fdr"),
     }
 
     return JSONResponse(response, headers={"Content-Type": "application/json"})

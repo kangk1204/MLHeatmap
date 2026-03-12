@@ -128,6 +128,7 @@ const API = {
             method: opts.method || 'wilcoxon',
             log2fc_threshold: opts.log2fcThreshold || 1.0,
             pvalue_threshold: opts.pvalueThreshold || 0.05,
+            use_raw_pvalue: opts.useRawPvalue || false,
         });
         const res = await fetch(`${this.baseUrl}/biomarker/deg?${params}`);
         if (!res.ok) throw new Error((await res.json()).error || 'DEG analysis failed');
