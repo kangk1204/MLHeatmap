@@ -47,11 +47,7 @@ async def set_groups(request: Request, body: GroupsRequest):
         body.groups[group_name] = unique_in_group
 
     session.groups = body.groups
-
-    # Invalidate downstream caches — cohort changed
-    session.biomarker_results = None
-    session.deg_results = None
-    session.heatmap_data = None
+    session.invalidate_analysis()
 
     return {"groups": session.groups, "n_groups": len(session.groups)}
 
@@ -80,10 +76,7 @@ async def exclude_samples(request: Request, body: ExcludeRequest):
             s for s in session.groups[group] if s not in body.samples
         ]
 
-    # Invalidate downstream caches — cohort changed
-    session.biomarker_results = None
-    session.deg_results = None
-    session.heatmap_data = None
+    session.invalidate_analysis()
 
     return {
         "excluded": session.excluded_samples,
@@ -100,10 +93,7 @@ async def include_samples(request: Request, body: ExcludeRequest):
 
     session.excluded_samples = [s for s in session.excluded_samples if s not in body.samples]
 
-    # Invalidate downstream caches — cohort changed
-    session.biomarker_results = None
-    session.deg_results = None
-    session.heatmap_data = None
+    session.invalidate_analysis()
 
     return {
         "excluded": session.excluded_samples,

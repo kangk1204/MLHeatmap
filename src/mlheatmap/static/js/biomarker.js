@@ -1,11 +1,35 @@
 /* Biomarker Panel Logic */
 const Biomarker = {
     _activeTab: 'ml',
+    _activeStream: null,
+    _mlRunToken: 0,
+    _degRunToken: 0,
+    _pendingDegRequest: false,
 
     _escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str ?? '';
         return div.innerHTML;
+    },
+
+    cancelPending() {
+        const hadDegRequest = this._pendingDegRequest;
+        this._mlRunToken += 1;
+        this._degRunToken += 1;
+        if (this._activeStream) {
+            this._activeStream.close();
+            this._activeStream = null;
+        }
+        this._pendingDegRequest = false;
+
+        const mlBtn = document.getElementById('btn-run-biomarker');
+        if (mlBtn) mlBtn.disabled = false;
+        const degBtn = document.getElementById('btn-run-deg');
+        if (degBtn) degBtn.disabled = false;
+
+        const progressEl = document.getElementById('biomarker-progress');
+        if (progressEl) progressEl.classList.add('hidden');
+        if (hadDegRequest) App.hideLoading();
     },
 
     init() {
@@ -148,6 +172,8 @@ const Biomarker = {
 
         const modelSelect = document.getElementById('model-select');
         const panelSelect = document.getElementById('panel-method-select');
+        const runToken = ++this._mlRunToken;
+        if (this._activeStream) this._activeStream.close();
         const es = API.biomarkerStream(App.state.sessionId, {
             nTopGenes,
             nEstimators,
@@ -155,17 +181,21 @@ const Biomarker = {
             model: modelSelect ? modelSelect.value : 'rf',
             panelMethod: panelSelect ? panelSelect.value : 'forward',
         });
+        this._activeStream = es;
 
         let gotResponse = false;
         const finishWithError = (message) => {
+            if (runToken !== this._mlRunToken) return;
             gotResponse = true;
             es.close();
+            this._activeStream = null;
             btn.disabled = false;
             progressEl.classList.add('hidden');
             App.showToast(message || 'Analysis failed', 'error');
         };
 
         es.addEventListener('progress', (e) => {
+            if (runToken !== this._mlRunToken) return;
             gotResponse = true;
             const data = JSON.parse(e.data);
             progressFill.style.width = data.pct + '%';
@@ -173,8 +203,10 @@ const Biomarker = {
         });
 
         es.addEventListener('complete', (e) => {
+            if (runToken !== this._mlRunToken) return;
             gotResponse = true;
             es.close();
+            this._activeStream = null;
             btn.disabled = false;
             progressEl.classList.add('hidden');
 
@@ -186,6 +218,7 @@ const Biomarker = {
         });
 
         es.addEventListener('app_error', (e) => {
+            if (runToken !== this._mlRunToken) return;
             try {
                 const data = JSON.parse(e.data);
                 finishWithError(data.detail || 'Analysis failed');
@@ -195,7 +228,9 @@ const Biomarker = {
         });
 
         es.onerror = () => {
+            if (runToken !== this._mlRunToken) return;
             es.close();
+            this._activeStream = null;
             btn.disabled = false;
             progressEl.classList.add('hidden');
             if (!gotResponse) {
@@ -530,6 +565,8 @@ const Biomarker = {
 
         const btn = document.getElementById('btn-run-deg');
         btn.disabled = true;
+        const runToken = ++this._degRunToken;
+        this._pendingDegRequest = true;
         App.showLoading('Running DEG analysis...');
 
         try {
@@ -542,6 +579,7 @@ const Biomarker = {
                 useRawPvalue: useRaw,
                 referenceGroup: refGroup,
             });
+            if (runToken !== this._degRunToken) return;
 
             App.state.degResults = data;
             this.showDegResults(data);
@@ -550,8 +588,11 @@ const Biomarker = {
             const toastUp = cg ? `${data.summary.n_up} up in ${cg}` : `${data.summary.n_up} up`;
             App.showToast(`DEG complete: ${toastUp}, ${data.summary.n_down} down`, 'success');
         } catch (err) {
+            if (runToken !== this._degRunToken) return;
             App.showToast(err.message, 'error');
         } finally {
+            if (runToken !== this._degRunToken) return;
+            this._pendingDegRequest = false;
             btn.disabled = false;
             App.hideLoading();
         }

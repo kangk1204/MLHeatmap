@@ -9,6 +9,13 @@ from fastapi.responses import JSONResponse, Response
 router = APIRouter(tags=["heatmap"])
 
 
+def _stale_inputs_response():
+    return JSONResponse(
+        {"error": "Analysis inputs changed during computation. Rerun with the current settings."},
+        status_code=409,
+    )
+
+
 def _order_samples_by_groups(
     expression: np.ndarray,
     sample_names: list[str],
@@ -57,6 +64,7 @@ async def get_heatmap(
     session = request.app.state.sessions.get(session_id)
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
+    start_revision = session.analysis_revision
 
     # Exclude samples if any
     sample_mask = [
@@ -79,6 +87,9 @@ async def get_heatmap(
         cluster_rows=cluster_rows,
         cluster_cols=cluster_cols,
     )
+
+    if session.analysis_revision != start_revision:
+        return _stale_inputs_response()
 
     session.heatmap_data = result
     session.heatmap_color_scale = color_scale
@@ -110,6 +121,7 @@ async def render_heatmap(
     session = request.app.state.sessions.get(session_id)
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
+    start_revision = session.analysis_revision
 
     # Exclude samples
     sample_mask = [
@@ -143,6 +155,9 @@ async def render_heatmap(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+    if session.analysis_revision != start_revision:
+        return _stale_inputs_response()
+
     media = "image/svg+xml" if fmt == "svg" else "image/png"
     return Response(image_bytes, media_type=media, headers={"Cache-Control": "no-store"})
 
@@ -164,6 +179,7 @@ async def get_shap_heatmap(
     session = request.app.state.sessions.get(session_id)
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
+    start_revision = session.analysis_revision
 
     if not session.biomarker_results:
         return JSONResponse({"error": "Run biomarker analysis first"}, status_code=400)
@@ -209,6 +225,9 @@ async def get_shap_heatmap(
         cluster_cols=cluster_cols,
     )
 
+    if session.analysis_revision != start_revision:
+        return _stale_inputs_response()
+
     session.heatmap_color_scale = color_scale
 
     response = dict(result)
@@ -240,6 +259,7 @@ async def get_deg_heatmap(
     session = request.app.state.sessions.get(session_id)
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
+    start_revision = session.analysis_revision
 
     if not hasattr(session, "deg_results") or not session.deg_results:
         return JSONResponse({"error": "Run DEG analysis first"}, status_code=400)
@@ -287,6 +307,9 @@ async def get_deg_heatmap(
         cluster_rows=cluster_rows,
         cluster_cols=cluster_cols,
     )
+
+    if session.analysis_revision != start_revision:
+        return _stale_inputs_response()
 
     session.heatmap_color_scale = color_scale
 

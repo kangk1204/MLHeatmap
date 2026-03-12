@@ -37,15 +37,11 @@ async def normalize(request: Request, body: NormalizeRequest):
     else:
         return JSONResponse({"error": f"Unknown method: {body.method}"}, status_code=400)
 
+    session.invalidate_analysis()
     session.normalized = normalized
     session.norm_method = body.method
     session.gene_names = df.index.tolist()
     session.sample_names = df.columns.tolist()
-
-    # Invalidate downstream caches — normalization changed
-    session.biomarker_results = None
-    session.deg_results = None
-    session.heatmap_data = None
 
     finite = normalized[np.isfinite(normalized)]
     stats = {
