@@ -27,7 +27,25 @@ class Session:
     deg_results: Optional[dict] = None
     heatmap_data: Optional[dict] = None
     heatmap_color_scale: str = "RdBu_r"
+    analysis_revision: int = 0
     created_at: float = field(default_factory=time.time)
+
+    def invalidate_analysis(self) -> None:
+        """Drop downstream analysis artifacts when cohort or params change."""
+        self.analysis_revision += 1
+        self.biomarker_results = None
+        self.deg_results = None
+        self.heatmap_data = None
+
+    def invalidate_normalization(self) -> None:
+        """Drop normalized data and all downstream artifacts."""
+        self.analysis_revision += 1
+        self.normalized = None
+        self.norm_method = ""
+        self.size_factors = None
+        self.biomarker_results = None
+        self.deg_results = None
+        self.heatmap_data = None
 
 
 class SessionStore:

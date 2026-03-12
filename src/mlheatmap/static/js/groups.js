@@ -1,6 +1,7 @@
 /* Groups Panel Logic - Enhanced for bulk operations */
 const Groups = {
     groupCount: 0,
+    _dirty: false,
     groupColors: ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899',
                   '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
     draggedSample: null,
@@ -36,23 +37,69 @@ const Groups = {
         }
     },
 
+    isDirty() {
+        return this._dirty;
+    },
+
+    markDirty() {
+        this._dirty = true;
+    },
+
+    markClean() {
+        this._dirty = false;
+    },
+
     populate(sampleNames) {
         this.allSamples = [...sampleNames];
         this.selectedSamples.clear();
         this.lastClickedIdx = -1;
 
+        const groupsArea = document.getElementById('groups-area');
         const pool = document.getElementById('sample-pool');
+        groupsArea.innerHTML = '';
         pool.innerHTML = '';
-        sampleNames.forEach((name, i) => {
-            pool.appendChild(this.createChip(name, true, i));
-        });
-        this.updatePoolCount();
+        this.groupCount = 0;
 
-        // Auto-create 2 groups
-        if (this.groupCount === 0) {
-            this.addGroup('Group A');
-            this.addGroup('Group B');
+        const savedGroups = App.state.groups || {};
+        const excluded = new Set(App.state.excludedSamples || []);
+        const assigned = new Set();
+
+        Object.values(savedGroups).forEach(samples => {
+            samples.forEach(sample => {
+                if (sampleNames.includes(sample)) assigned.add(sample);
+            });
+        });
+
+        sampleNames.forEach((name, i) => {
+            if (!assigned.has(name)) {
+                const chip = this.createChip(name, true, i);
+                if (excluded.has(name)) chip.classList.add('excluded');
+                pool.appendChild(chip);
+            }
+        });
+
+        const groupEntries = Object.entries(savedGroups).filter(([, samples]) =>
+            samples.some(sample => sampleNames.includes(sample))
+        );
+        if (groupEntries.length > 0) {
+            groupEntries.forEach(([name, samples]) => {
+                this.addGroup(name, { markDirty: false });
+                const idx = this.groupCount - 1;
+                samples.forEach(sample => {
+                    if (sampleNames.includes(sample)) {
+                        this.moveSampleToGroup(sample, idx, { markDirty: false });
+                    }
+                });
+            });
+        } else {
+            this.addGroup('Group A', { markDirty: false });
+            this.addGroup('Group B', { markDirty: false });
         }
+
+        this.updatePoolCount();
+        this.updateGroupCounts();
+        this.updateSelectionCount();
+        this.markClean();
 
         // Clear search
         const searchInput = document.getElementById('sample-search');
@@ -192,7 +239,7 @@ const Groups = {
         }
     },
 
-    addGroup(name) {
+    addGroup(name, { markDirty = true } = {}) {
         const idx = this.groupCount++;
         const color = this.groupColors[idx % this.groupColors.length];
         if (!name) name = `Group ${String.fromCharCode(65 + idx)}`;
@@ -222,6 +269,7 @@ const Groups = {
         col.querySelector('.btn-assign').addEventListener('click', () => {
             this.assignSelectedToGroup(idx);
         });
+        col.querySelector('.group-name-input').addEventListener('input', () => this.markDirty());
 
         const dropzone = col.querySelector('.group-dropzone');
         dropzone.addEventListener('dragover', (e) => {
@@ -256,9 +304,12 @@ const Groups = {
             });
             col.remove();
             this.updatePoolCount();
+            this.updateGroupCounts();
+            this.markDirty();
         });
 
         document.getElementById('groups-area').appendChild(col);
+        if (markDirty) this.markDirty();
     },
 
     assignSelectedToGroup(groupIdx) {
@@ -274,7 +325,7 @@ const Groups = {
         App.showToast(`${names.length} sample${names.length > 1 ? 's' : ''} assigned`, 'success');
     },
 
-    moveSampleToGroup(sampleName, groupIdx) {
+    moveSampleToGroup(sampleName, groupIdx, { markDirty = true } = {}) {
         // Remove from current location
         document.querySelectorAll(`.sample-chip[data-sample="${CSS.escape(sampleName)}"]`).forEach(el => el.remove());
 
@@ -285,6 +336,7 @@ const Groups = {
         }
         this.updatePoolCount();
         this.updateGroupCounts();
+        if (markDirty) this.markDirty();
     },
 
     async toggleExclude(chip) {
@@ -292,17 +344,25 @@ const Groups = {
         chip.classList.toggle('excluded', willExclude);
         const name = chip.dataset.sample;
         try {
+            let response = null;
             if (willExclude) {
                 this.selectedSamples.delete(name);
                 chip.classList.remove('selected');
                 if (App.state.sessionId) {
-                    await API.excludeSamples(App.state.sessionId, [name]);
+                    response = await API.excludeSamples(App.state.sessionId, [name]);
                 }
             } else if (App.state.sessionId) {
-                await API.includeSamples(App.state.sessionId, [name]);
+                response = await API.includeSamples(App.state.sessionId, [name]);
             }
 
-            App.state.groups = this.getGroups();
+            App.state.excludedSamples = response?.excluded || [];
+            if (App.state.sessionId) {
+                const saved = await API.setGroups(App.state.sessionId, this.getGroups());
+                App.state.groups = saved.groups;
+            } else {
+                App.state.groups = this.getGroups();
+            }
+            this.markClean();
             App.invalidateAnalysisState();
         } catch (err) {
             chip.classList.toggle('excluded', !willExclude);
@@ -346,11 +406,12 @@ const Groups = {
             this.selectedSamples.clear();
 
             groups.forEach(([prefix, members]) => {
-                this.addGroup(prefix);
+                this.addGroup(prefix, { markDirty: false });
                 const idx = this.groupCount - 1;
-                members.forEach(s => this.moveSampleToGroup(s, idx));
+                members.forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
             });
 
+            this.markDirty();
             App.showToast(`Auto-detected ${groups.length} groups`, 'success');
         } else {
             App.showToast('Could not auto-detect groups. Please assign manually.', 'info');
@@ -394,11 +455,12 @@ const Groups = {
                 this.selectedSamples.clear();
 
                 groups.forEach(([prefix, members]) => {
-                    this.addGroup(prefix);
+                    this.addGroup(prefix, { markDirty: false });
                     const idx = this.groupCount - 1;
-                    members.forEach(s => this.moveSampleToGroup(s, idx));
+                    members.forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
                 });
 
+                this.markDirty();
                 App.showToast(`Regex grouped ${matched} samples into ${groups.length} groups`, 'success');
             } else {
                 App.showToast(`Pattern matched ${matched}/${samples.length} samples into ${groups.length} groups. Needs 2-10 groups matching >50% of samples.`, 'info');
@@ -438,26 +500,39 @@ const Groups = {
         return groups;
     },
 
-    async saveAndContinue() {
+    async persistIfDirty({ requireValid = false } = {}) {
+        if (!this.isDirty()) return true;
+
         const groups = this.getGroups();
         const groupNames = Object.keys(groups);
-
         if (groupNames.length < 2) {
-            App.showToast('Please assign samples to at least 2 groups', 'error');
-            return;
+            if (requireValid) {
+                App.showToast('Please assign samples to at least 2 groups', 'error');
+                return false;
+            }
+            return true;
         }
 
         App.showLoading('Saving groups...');
         try {
-            await API.setGroups(App.state.sessionId, groups);
-            App.state.groups = groups;
+            const saved = await API.setGroups(App.state.sessionId, groups);
+            App.state.groups = saved.groups;
+            this.markClean();
             App.invalidateAnalysisState();
             App.markStepCompleted('groups');
-            App.goToPanel('biomarker');
+            return true;
         } catch (err) {
             App.showToast(err.message, 'error');
+            return false;
         } finally {
             App.hideLoading();
+        }
+    },
+
+    async saveAndContinue() {
+        const saved = await this.persistIfDirty({ requireValid: true });
+        if (saved) {
+            App.goToPanel('biomarker');
         }
     },
 };

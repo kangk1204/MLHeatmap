@@ -6,6 +6,7 @@ const App = {
         species: 'unknown',
         idType: 'unknown',
         groups: {},
+        excludedSamples: [],
         currentPanel: 'upload',
     },
 
@@ -41,13 +42,10 @@ const App = {
             });
         });
         document.getElementById('btn-normalize').addEventListener('click', () => this.normalize());
-        document.getElementById('btn-to-groups').addEventListener('click', () => {
-            this.goToPanel('groups');
-            Groups.populate(this.state.sampleNames);
-        });
+        document.getElementById('btn-to-groups').addEventListener('click', () => this.goToPanel('groups'));
     },
 
-    goToPanel(panelId) {
+    _activatePanel(panelId) {
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.nav-step').forEach(s => s.classList.remove('active'));
 
@@ -57,10 +55,27 @@ const App = {
 
         this.state.currentPanel = panelId;
 
+        if (panelId === 'groups' && typeof Groups !== 'undefined') {
+            Groups.populate(this.state.sampleNames);
+        }
+
         // Refresh export card visibility when entering export panel
         if (panelId === 'export' && typeof Export !== 'undefined') {
             Export.refresh();
         }
+    },
+
+    async goToPanel(panelId) {
+        if (panelId === this.state.currentPanel) return;
+
+        const leavingGroups = this.state.currentPanel === 'groups' && panelId !== 'groups';
+        if (leavingGroups && typeof Groups !== 'undefined' && typeof Groups.persistIfDirty === 'function') {
+            const requiresValidGroups = ['biomarker', 'heatmap', 'export'].includes(panelId);
+            const saved = await Groups.persistIfDirty({ requireValid: requiresValidGroups });
+            if (!saved && requiresValidGroups) return;
+        }
+
+        this._activatePanel(panelId);
     },
 
     markStepCompleted(stepId) {
@@ -81,6 +96,12 @@ const App = {
         this.state.biomarkerResults = null;
         this.state.degResults = null;
         if (clearNormalization) this.state.totalGenes = null;
+        if (typeof Biomarker !== 'undefined' && typeof Biomarker.cancelPending === 'function') {
+            Biomarker.cancelPending();
+        }
+        if (typeof Heatmap !== 'undefined' && typeof Heatmap.cancelPending === 'function') {
+            Heatmap.cancelPending();
+        }
 
         const clearPlot = (id) => {
             const el = document.getElementById(id);
@@ -241,12 +262,20 @@ const App = {
     },
 
     resetAll() {
+        if (typeof Biomarker !== 'undefined' && typeof Biomarker.cancelPending === 'function') {
+            Biomarker.cancelPending();
+        }
+        if (typeof Heatmap !== 'undefined' && typeof Heatmap.cancelPending === 'function') {
+            Heatmap.cancelPending();
+        }
+
         // Clear state
         this.state.sessionId = null;
         this.state.sampleNames = [];
         this.state.species = 'unknown';
         this.state.idType = 'unknown';
         this.state.groups = {};
+        this.state.excludedSamples = [];
         this.state.biomarkerResults = null;
         this.state.degResults = null;
         this.state.totalGenes = null;
@@ -282,11 +311,12 @@ const App = {
         // Reset groups
         Groups.groupCount = 0;
         Groups.selectedSamples.clear();
+        if (typeof Groups.markClean === 'function') Groups.markClean();
         document.getElementById('groups-area').innerHTML = '';
         document.getElementById('sample-pool').innerHTML = '';
 
         // Go to upload
-        this.goToPanel('upload');
+        this._activatePanel('upload');
     },
 
     showLoading(text = 'Processing...') {

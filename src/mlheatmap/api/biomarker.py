@@ -9,6 +9,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 router = APIRouter(tags=["biomarker"])
 
 
+def _stale_inputs_response():
+    return JSONResponse(
+        {"error": "Analysis inputs changed during computation. Rerun with the current settings."},
+        status_code=409,
+    )
+
+
 @router.get("/biomarker/stream")
 async def biomarker_stream(
     request: Request,
@@ -66,6 +73,7 @@ async def biomarker_stream(
         if validation_error:
             yield f"event: app_error\ndata: {json.dumps({'detail': validation_error})}\n\n"
             return
+        start_revision = session.analysis_revision
 
         progress_queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
@@ -110,6 +118,12 @@ async def biomarker_stream(
 
         try:
             result = future.result()
+            if session.analysis_revision != start_revision:
+                yield (
+                    "event: app_error\ndata: "
+                    f"{json.dumps({'detail': 'Analysis inputs changed during execution. Rerun the analysis.'})}\n\n"
+                )
+                return
             session.biomarker_results = result
             yield f"event: complete\ndata: {json.dumps(result, default=_json_safe)}\n\n"
         except Exception as e:
@@ -134,6 +148,7 @@ async def deg_analysis(
     session = request.app.state.sessions.get(session_id)
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
+    start_revision = session.analysis_revision
 
     if len(session.groups) != 2:
         return JSONResponse(
@@ -207,6 +222,9 @@ async def deg_analysis(
         use_raw_pvalue=use_raw_pvalue,
         raw_counts=sf_counts,
     )
+
+    if session.analysis_revision != start_revision:
+        return _stale_inputs_response()
 
     # Store for heatmap use
     session.deg_results = result

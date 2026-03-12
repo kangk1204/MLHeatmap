@@ -28,10 +28,23 @@ const Upload = {
         App.showLoading('Uploading and parsing...');
         try {
             const result = await API.upload(file);
+            App.completedSteps.clear();
+            document.querySelectorAll('.nav-step').forEach(s => s.classList.remove('completed'));
             App.state.sessionId = result.session_id;
             App.state.sampleNames = result.sample_names;
             App.state.species = result.detected_species;
             App.state.idType = result.detected_id_type;
+            App.state.groups = {};
+            App.state.excludedSamples = [];
+            App.invalidateAnalysisState({ clearNormalization: true });
+
+            if (typeof Groups !== 'undefined') {
+                Groups.groupCount = 0;
+                if (typeof Groups.markClean === 'function') Groups.markClean();
+                document.getElementById('groups-area').innerHTML = '';
+                document.getElementById('sample-pool').innerHTML = '';
+            }
+            document.getElementById('mapping-result').classList.add('hidden');
 
             // Show results
             document.getElementById('badge-shape').textContent = `${result.shape[0].toLocaleString()} genes × ${result.shape[1]} samples`;

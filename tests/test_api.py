@@ -1,6 +1,9 @@
 """API integration tests using FastAPI TestClient."""
 
 import os
+import threading
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -309,6 +312,137 @@ class TestDEG:
         r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
         assert r.status_code == 400
         assert "no valid samples after exclusion" in r.json()["error"]
+
+
+class TestReentryAndConcurrency:
+    def test_group_change_invalidates_existing_ml_and_deg_results(self, client):
+        sid, samples, _ = _prepare_deg_session(client)
+
+        r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
+        assert r.status_code == 200
+
+        r = client.get(
+            f"/api/v1/biomarker/stream?session_id={sid}&n_top_genes=5&n_estimators=50&cv_folds=2"
+        )
+        assert r.status_code == 200
+        assert "event: complete" in r.text
+
+        new_groups = {
+            "Alt A": [samples[0], samples[2], samples[4]],
+            "Alt B": [samples[1], samples[3], samples[5]],
+        }
+        r = client.post("/api/v1/groups", json={"session_id": sid, "groups": new_groups})
+        assert r.status_code == 200
+
+        session = client.app.state.sessions.get(sid)
+        assert session.biomarker_results is None
+        assert session.deg_results is None
+        assert session.heatmap_data is None
+
+        r = client.get(f"/api/v1/heatmap/shap?session_id={sid}&top_n=5")
+        assert r.status_code == 400
+        assert "Run biomarker analysis first" in r.json()["error"]
+
+        r = client.get(f"/api/v1/heatmap/deg?session_id={sid}&top_n=5")
+        assert r.status_code == 400
+        assert "Run DEG analysis first" in r.json()["error"]
+
+    def test_biomarker_stream_does_not_store_stale_results_after_group_change(self, client):
+        sid, samples, _ = _prepare_deg_session(client)
+        started = threading.Event()
+        finish = threading.Event()
+        response = {}
+
+        def fake_run_biomarker_analysis(**kwargs):
+            started.set()
+            finish.wait(5)
+            return {
+                "accuracy": 0.9,
+                "top_genes": [{"symbol": "G1", "importance": 1.0, "shap_mean_abs": 0.5}],
+                "roc_data": [],
+                "optimal_combo": None,
+                "model": "Random Forest",
+            }
+
+        def run_stream():
+            r = client.get(f"/api/v1/biomarker/stream?session_id={sid}&n_top_genes=5")
+            response["status_code"] = r.status_code
+            response["text"] = r.text
+
+        with patch("mlheatmap.core.biomarker.run_biomarker_analysis", fake_run_biomarker_analysis):
+            thread = threading.Thread(target=run_stream)
+            thread.start()
+            assert started.wait(5)
+
+            r = client.post(
+                "/api/v1/groups",
+                json={
+                    "session_id": sid,
+                    "groups": {
+                        "Alt A": [samples[0], samples[2], samples[4]],
+                        "Alt B": [samples[1], samples[3], samples[5]],
+                    },
+                },
+            )
+            assert r.status_code == 200
+
+            finish.set()
+            thread.join(5)
+
+        session = client.app.state.sessions.get(sid)
+        assert session.biomarker_results is None
+        assert response["status_code"] == 200
+        assert "event: app_error" in response["text"]
+        assert "inputs changed during execution" in response["text"]
+
+    def test_heatmap_does_not_cache_stale_results_after_group_change(self, client):
+        sid, samples, _ = _prepare_deg_session(client)
+        started = threading.Event()
+        finish = threading.Event()
+        response = {}
+
+        def fake_compute_heatmap_data(**kwargs):
+            started.set()
+            finish.wait(5)
+            return {
+                "z": [[1, 2, 3, 4, 5, 6]],
+                "x": kwargs["sample_names"],
+                "y": ["Gene1"],
+                "row_dendrogram": {"icoord": [], "dcoord": []},
+                "col_dendrogram": {"icoord": [], "dcoord": []},
+                "n_total_genes": 1,
+                "n_shown_genes": 1,
+            }
+
+        def run_heatmap():
+            r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20&cluster_cols=false")
+            response["status_code"] = r.status_code
+            response["json"] = r.json()
+
+        with patch("mlheatmap.core.clustering.compute_heatmap_data", fake_compute_heatmap_data):
+            thread = threading.Thread(target=run_heatmap)
+            thread.start()
+            assert started.wait(5)
+
+            r = client.post(
+                "/api/v1/groups",
+                json={
+                    "session_id": sid,
+                    "groups": {
+                        "Alt A": [samples[0], samples[2], samples[4]],
+                        "Alt B": [samples[1], samples[3], samples[5]],
+                    },
+                },
+            )
+            assert r.status_code == 200
+
+            finish.set()
+            thread.join(5)
+
+        session = client.app.state.sessions.get(sid)
+        assert session.heatmap_data is None
+        assert response["status_code"] == 409
+        assert "inputs changed during computation" in response["json"]["error"]
 
 
 # ──────────────────────────────────────────────

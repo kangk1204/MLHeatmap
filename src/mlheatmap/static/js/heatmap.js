@@ -2,6 +2,8 @@
 const Heatmap = {
     _isShapMode: false,
     _isDegMode: false,
+    _requestToken: 0,
+    _pendingRequest: false,
     _serverImageUrl: null,  // Track blob URL for cleanup
     _maxGenes: 60000,  // Updated after normalization
     _activeMax: 60000, // Current mode's effective max (changes per mode)
@@ -13,6 +15,13 @@ const Heatmap = {
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    },
+
+    cancelPending() {
+        const hadPending = this._pendingRequest;
+        this._requestToken += 1;
+        this._pendingRequest = false;
+        if (hadPending) App.hideLoading();
     },
 
     /** Consolidate dendrogram branches into a single trace using null separators. */
@@ -175,9 +184,11 @@ const Heatmap = {
 
         // Auto-switch to server-side rendering for large gene sets
         if (topN > this.SERVER_RENDER_THRESHOLD) {
-            return this.renderServerSide(topN);
+            return this.renderServerSide(topN, ++this._requestToken);
         }
 
+        const requestToken = ++this._requestToken;
+        this._pendingRequest = true;
         App.showLoading('Computing heatmap...');
         try {
             const clusterRowsEl = document.getElementById('cluster-rows');
@@ -190,6 +201,7 @@ const Heatmap = {
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
+            if (requestToken !== this._requestToken) return;
 
             // Restore header for regular heatmap
             const header = document.querySelector('#panel-heatmap .panel-header h1');
@@ -200,13 +212,17 @@ const Heatmap = {
             this.plotHeatmap(data);
             App.markStepCompleted('heatmap');
         } catch (err) {
+            if (requestToken !== this._requestToken) return;
             App.showToast(err.message, 'error');
         } finally {
+            if (requestToken !== this._requestToken) return;
+            this._pendingRequest = false;
             App.hideLoading();
         }
     },
 
-    async renderServerSide(topN) {
+    async renderServerSide(topN, requestToken = ++this._requestToken) {
+        this._pendingRequest = true;
         App.showLoading(`Rendering ${topN.toLocaleString()} genes on server...`);
         try {
             // Clean up previous blob URL
@@ -226,6 +242,10 @@ const Heatmap = {
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
                 dpi: 150,
             });
+            if (requestToken !== this._requestToken) {
+                URL.revokeObjectURL(imageUrl);
+                return;
+            }
 
             this._serverImageUrl = imageUrl;
 
@@ -238,8 +258,11 @@ const Heatmap = {
             this.displayServerImage(imageUrl, topN);
             App.markStepCompleted('heatmap');
         } catch (err) {
+            if (requestToken !== this._requestToken) return;
             App.showToast('Server render failed: ' + err.message, 'error');
         } finally {
+            if (requestToken !== this._requestToken) return;
+            this._pendingRequest = false;
             App.hideLoading();
         }
     },
@@ -593,6 +616,8 @@ const Heatmap = {
         if (!bioResults) return App.showToast('Run biomarker analysis first', 'error');
         this._isShapMode = true;
         this._isDegMode = false;
+        const requestToken = ++this._requestToken;
+        this._pendingRequest = true;
 
         // Clamp slider to SHAP gene range
         const maxShapGenes = bioResults.top_genes ? bioResults.top_genes.length : 20;
@@ -619,6 +644,7 @@ const Heatmap = {
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : false,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
+            if (requestToken !== this._requestToken) return;
 
             // Update panel header to indicate SHAP mode
             const header = document.querySelector('#panel-heatmap .panel-header h1');
@@ -629,8 +655,11 @@ const Heatmap = {
             this.plotShapHeatmap(data);
             App.markStepCompleted('heatmap');
         } catch (err) {
+            if (requestToken !== this._requestToken) return;
             App.showToast('SHAP heatmap failed: ' + err.message, 'error');
         } finally {
+            if (requestToken !== this._requestToken) return;
+            this._pendingRequest = false;
             App.hideLoading();
         }
     },
@@ -920,6 +949,8 @@ const Heatmap = {
 
         this._isShapMode = false;
         this._isDegMode = true;
+        const requestToken = ++this._requestToken;
+        this._pendingRequest = true;
 
         const DEG_MAX_GENES = 500;
         this._activeMax = DEG_MAX_GENES;
@@ -948,6 +979,7 @@ const Heatmap = {
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
             });
+            if (requestToken !== this._requestToken) return;
 
             const header = document.querySelector('#panel-heatmap .panel-header h1');
             const subtitle = document.querySelector('#panel-heatmap .panel-header .panel-subtitle');
@@ -958,8 +990,11 @@ const Heatmap = {
             this.plotDegHeatmap(data);
             App.markStepCompleted('heatmap');
         } catch (err) {
+            if (requestToken !== this._requestToken) return;
             App.showToast('DEG heatmap failed: ' + err.message, 'error');
         } finally {
+            if (requestToken !== this._requestToken) return;
+            this._pendingRequest = false;
             App.hideLoading();
         }
     },
