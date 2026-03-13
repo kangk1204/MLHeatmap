@@ -1,0 +1,229 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-14]
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build and test tooling
+        run: python -m pip install --upgrade pip build pytest httpx
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Install built wheel
+        run: |
+          $wheel = Get-ChildItem dist/*.whl | Select-Object -First 1
+          python -m pip install $wheel.FullName
+
+      - name: Verify packaged capabilities
+        run: |
+          @'
+          from mlheatmap.core.capabilities import get_capabilities
+
+          caps = get_capabilities()
+          assert caps["gene_tables"]["human"]
+          assert caps["gene_tables"]["mouse"]
+          assert caps["exports"]["image_mode"] == "browser"
+          print(caps)
+          '@ | python -
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Smoke test CLI startup
+        run: |
+          @'
+          import subprocess
+          import sys
+          import time
+          import urllib.request
+
+          proc = subprocess.Popen([sys.executable, "-m", "mlheatmap", "--no-browser", "--port", "8765"])
+          deadline = time.time() + 45
+          ok = False
+          try:
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8765/api/v1/capabilities", timeout=2) as resp:
+                          ok = resp.status == 200
+                          if ok:
+                              break
+                  except Exception:
+                      time.sleep(1)
+              assert ok, "Server did not become ready in time"
+          finally:
+              proc.terminate()
+              proc.wait(timeout=15)
+          '@ | python -
+
+  docker:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build local Docker image
+        run: docker build -t mlheatmap:test .
+
+      - name: Start container and smoke test capabilities
+        run: |
+          docker run -d --rm --name mlheatmap-test -p 8765:8765 mlheatmap:test
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8765/api/v1/capabilities >/tmp/capabilities.json; then
+              cat /tmp/capabilities.json
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8765/api/v1/capabilities >/tmp/capabilities.json
+          docker stop mlheatmap-test
+
+      - name: Build multi-arch image
+        run: >
+          docker buildx build
+          --platform linux/amd64,linux/arm64
+          --output=type=oci,dest=/tmp/mlheatmap-multiarch.tar
+          .
+
+  install-scripts:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-14]
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install via Windows script
+        if: runner.os == 'Windows'
+        run: cmd /c install-windows.cmd --no-launch
+
+      - name: Install via Ubuntu script
+        if: runner.os == 'Linux'
+        run: bash ./install-ubuntu.sh --no-launch
+
+      - name: Install via macOS script
+        if: runner.os == 'macOS'
+        run: bash ./install-macos.sh --no-launch
+
+      - name: Verify Windows run script help
+        if: runner.os == 'Windows'
+        run: cmd /c run-windows.cmd --help
+
+      - name: Verify Ubuntu run script help
+        if: runner.os == 'Linux'
+        run: bash ./run-ubuntu.sh --help
+
+      - name: Verify macOS run script help
+        if: runner.os == 'macOS'
+        run: bash ./run-macos.sh --help
+
+      - name: Smoke test Windows run script
+        if: runner.os == 'Windows'
+        run: |
+          @'
+          import subprocess
+          import time
+          import urllib.request
+
+          proc = subprocess.Popen(["cmd", "/c", "run-windows.cmd --no-browser --port 8768"])
+          deadline = time.time() + 45
+          ok = False
+          try:
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8768/api/v1/capabilities", timeout=2) as resp:
+                          ok = resp.status == 200
+                          if ok:
+                              break
+                  except Exception:
+                      time.sleep(1)
+              assert ok, "Windows run script did not become ready in time"
+          finally:
+              proc.terminate()
+              proc.wait(timeout=15)
+          '@ | python -
+
+      - name: Smoke test Ubuntu run script
+        if: runner.os == 'Linux'
+        run: |
+          @'
+          import subprocess
+          import time
+          import urllib.request
+
+          proc = subprocess.Popen(["bash", "./run-ubuntu.sh", "--no-browser", "--port", "8768"])
+          deadline = time.time() + 45
+          ok = False
+          try:
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8768/api/v1/capabilities", timeout=2) as resp:
+                          ok = resp.status == 200
+                          if ok:
+                              break
+                  except Exception:
+                      time.sleep(1)
+              assert ok, "Ubuntu run script did not become ready in time"
+          finally:
+              proc.terminate()
+              proc.wait(timeout=15)
+          '@ | python -
+
+      - name: Smoke test macOS run script
+        if: runner.os == 'macOS'
+        run: |
+          @'
+          import subprocess
+          import time
+          import urllib.request
+
+          proc = subprocess.Popen(["bash", "./run-macos.sh", "--no-browser", "--port", "8768"])
+          deadline = time.time() + 45
+          ok = False
+          try:
+              while time.time() < deadline:
+                  try:
+                      with urllib.request.urlopen("http://127.0.0.1:8768/api/v1/capabilities", timeout=2) as resp:
+                          ok = resp.status == 200
+                          if ok:
+                              break
+                  except Exception:
+                      time.sleep(1)
+              assert ok, "macOS run script did not become ready in time"
+          finally:
+              proc.terminate()
+              proc.wait(timeout=15)
+          '@ | python -

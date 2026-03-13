@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Interactive RNA-seq heatmap and biomarker discovery tool"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.11,<3.13"
 authors = [
     { name = "Keunsoo Kang" }
 ]
@@ -18,23 +18,27 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "fastapi>=0.100.0",
-    "uvicorn[standard]>=0.20.0",
+    "uvicorn>=0.20.0",
     "numpy>=1.24.0",
     "scipy>=1.10.0",
     "pandas>=2.0.0",
     "scikit-learn>=1.3.0",
-    "shap>=0.42.0",
+    "shap>=0.51.0",
     "openpyxl>=3.1.0",
     "python-multipart>=0.0.6",
-    "plotly>=5.15.0",
-    "kaleido>=0.2.0",
     "matplotlib>=3.7.0",
     "seaborn>=0.12.0",
-    "xgboost>=1.7.0",
-    "lightgbm>=4.0.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "xgboost>=3.2.0",
+    "lightgbm>=4.6.0",
 ]
 
 [project.scripts]
@@ -42,3 +46,14 @@ mlheatmap = "mlheatmap.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlheatmap"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/mlheatmap",
+    "/tests",
+    "/test_data",
+    "/scripts",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]

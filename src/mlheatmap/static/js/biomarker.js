@@ -68,6 +68,31 @@ const Biomarker = {
         }
     },
 
+    applyCapabilities(capabilities) {
+        const modelSelect = document.getElementById('model-select');
+        if (!modelSelect || !capabilities || !capabilities.models) return;
+
+        const firstAvailable = Object.keys(capabilities.models).find(
+            key => capabilities.models[key].available,
+        );
+
+        Array.from(modelSelect.options).forEach(option => {
+            const info = capabilities.models[option.value];
+            if (!info) return;
+            option.disabled = !info.available;
+            option.textContent = info.available
+                ? info.label
+                : `${info.label} (Docker/full)`;
+            option.title = info.available ? '' : (info.unavailable_reason || '');
+        });
+
+        if (modelSelect.selectedOptions[0] && modelSelect.selectedOptions[0].disabled && firstAvailable) {
+            modelSelect.value = firstAvailable;
+        }
+
+        this._updateModelParams();
+    },
+
     _switchTab(tab) {
         this._activeTab = tab;
         document.querySelectorAll('.bio-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
