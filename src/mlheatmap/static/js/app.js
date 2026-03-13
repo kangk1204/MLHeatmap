@@ -8,6 +8,7 @@ const App = {
         groups: {},
         excludedSamples: [],
         currentPanel: 'upload',
+        capabilities: null,
     },
 
     completedSteps: new Set(),
@@ -18,6 +19,7 @@ const App = {
         Groups.init();
         Biomarker.init();
         Export.init();
+        this.loadCapabilities();
 
         // Logo click → full reset
         document.querySelector('.logo').addEventListener('click', () => this.resetAll());
@@ -43,6 +45,21 @@ const App = {
         });
         document.getElementById('btn-normalize').addEventListener('click', () => this.normalize());
         document.getElementById('btn-to-groups').addEventListener('click', () => this.goToPanel('groups'));
+    },
+
+    async loadCapabilities() {
+        try {
+            const capabilities = await API.getCapabilities();
+            this.state.capabilities = capabilities;
+            if (typeof Biomarker !== 'undefined' && typeof Biomarker.applyCapabilities === 'function') {
+                Biomarker.applyCapabilities(capabilities);
+            }
+            if (typeof Export !== 'undefined' && typeof Export.refresh === 'function') {
+                Export.refresh();
+            }
+        } catch (err) {
+            this.showToast(`Capability detection failed: ${err.message}`, 'error');
+        }
     },
 
     _activatePanel(panelId) {
