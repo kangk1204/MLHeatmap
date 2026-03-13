@@ -50,7 +50,7 @@ def _module_available(module_name: str) -> tuple[bool, str | None]:
     try:
         importlib.import_module(module_name)
         return True, None
-    except ImportError as exc:
+    except Exception as exc:
         return False, str(exc)
 
 

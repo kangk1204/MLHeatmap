@@ -121,3 +121,17 @@ def test_browser_export_script_uses_client_side_plot_export():
     assert "_exportPlotlyElement" in export_js
     assert "_downloadServerHeatmap" in export_js
     assert "results_excel" in export_js
+
+
+def test_optional_module_runtime_errors_do_not_break_capability_checks():
+    from mlheatmap.core import capabilities
+
+    capabilities._module_available.cache_clear()
+    try:
+        with patch("mlheatmap.core.capabilities.importlib.import_module", side_effect=OSError("libgomp.so.1 missing")):
+            available, reason = capabilities._module_available("lightgbm")
+
+        assert available is False
+        assert "libgomp" in reason
+    finally:
+        capabilities._module_available.cache_clear()
