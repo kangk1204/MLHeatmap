@@ -135,3 +135,25 @@ def test_optional_module_runtime_errors_do_not_break_capability_checks():
         assert "libgomp" in reason
     finally:
         capabilities._module_available.cache_clear()
+
+
+def test_deg_volcano_frontend_supports_repel_like_labels():
+    root = Path(__file__).parents[1] / "src" / "mlheatmap" / "static"
+    index_html = (root / "index.html").read_text(encoding="utf-8")
+    biomarker_js = (root / "js" / "biomarker.js").read_text(encoding="utf-8")
+    export_js = (root / "js" / "export.js").read_text(encoding="utf-8")
+
+    assert "deg-show-labels" in index_html
+    assert "deg-label-count" in index_html
+    assert "deg-clear-pins" in index_html
+    assert "deg-method-hint" in index_html
+    assert "ma-plot" in index_html
+    assert 'data-type="ma_png"' in index_html
+    assert "_selectVolcanoLabels" in biomarker_js
+    assert "_mergePinnedAndAutoLabels" in biomarker_js
+    assert "_buildVolcanoAnnotations" in biomarker_js
+    assert "_bindDegPointPinning" in biomarker_js
+    assert "plotMa(data)" in biomarker_js
+    assert "plotDegSummaryBar(data)" in biomarker_js
+    assert "type.startsWith('volcano_') || type.startsWith('ma_')" in export_js
+    assert "_exportPlotlyElement('ma-plot'" in export_js

@@ -14,6 +14,9 @@ const Export = {
         const volcanoCard = document.querySelector('.export-card[data-type="volcano_png"]');
         if (volcanoCard) volcanoCard.style.display = hasDeg ? '' : 'none';
 
+        const maCard = document.querySelector('.export-card[data-type="ma_png"]');
+        if (maCard) maCard.style.display = hasDeg ? '' : 'none';
+
         const shapCard = document.querySelector('.export-card[data-type="shap_png"]');
         if (shapCard) shapCard.style.display = hasMl ? '' : 'none';
 
@@ -27,7 +30,7 @@ const Export = {
             return;
         }
 
-        const needsDeg = type.startsWith('volcano_');
+        const needsDeg = type.startsWith('volcano_') || type.startsWith('ma_');
         const needsMl = type.startsWith('shap_') || type.startsWith('auc_');
         if (needsDeg && !App.state.degResults) {
             App.showToast('Run DEG analysis first', 'error');
@@ -55,6 +58,11 @@ const Export = {
 
         if (type === 'volcano_png' || type === 'volcano_svg') {
             this._exportPlotlyElement('volcano-plot', type, 'volcano_plot');
+            return;
+        }
+
+        if (type === 'ma_png' || type === 'ma_svg') {
+            this._exportPlotlyElement('ma-plot', type, 'ma_plot');
             return;
         }
 

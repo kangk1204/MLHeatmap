@@ -475,7 +475,25 @@
                     <div class="results-grid">
                         <div class="glass-card result-card">
                             <h3>Volcano Plot</h3>
+                            <div class="plot-toolbar volcano-toolbar">
+                                <label class="checkbox-label compact">
+                                    <input type="checkbox" id="deg-show-labels" checked>
+                                    Auto-label top hits
+                                </label>
+                                <div class="control-group compact">
+                                    <label>Label Count</label>
+                                    <input type="number" id="deg-label-count" class="number-input" value="12" min="0" max="30" step="1">
+                                </div>
+                                <button class="btn btn-sm btn-outline" id="deg-clear-pins" type="button" disabled>Clear pinned</button>
+                                <div class="toolbar-hint">Repel-like labels for the strongest DEG hits</div>
+                            </div>
+                            <p class="method-desc deg-method-hint" id="deg-method-hint"></p>
                             <div id="volcano-plot" style="width:100%;height:500px;"></div>
+                        </div>
+                        <div class="glass-card result-card">
+                            <h3>MA Plot</h3>
+                            <p class="method-desc deg-method-hint" id="ma-method-hint"></p>
+                            <div id="ma-plot" style="width:100%;height:420px;"></div>
                         </div>
                         <div class="glass-card result-card">
                             <h3>DEG Summary</h3>
@@ -613,6 +631,15 @@
                         <div class="export-formats">
                             <button class="btn btn-sm btn-outline" data-type="volcano_png">PNG</button>
                             <button class="btn btn-sm btn-outline" data-type="volcano_svg">SVG</button>
+                        </div>
+                    </div>
+                    <div class="export-card glass-card" data-type="ma_png">
+                        <div class="export-icon">📉</div>
+                        <h3>MA Plot</h3>
+                        <p>Mean expression vs log2FC</p>
+                        <div class="export-formats">
+                            <button class="btn btn-sm btn-outline" data-type="ma_png">PNG</button>
+                            <button class="btn btn-sm btn-outline" data-type="ma_svg">SVG</button>
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="shap_png">
