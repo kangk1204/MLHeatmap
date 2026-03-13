@@ -44,17 +44,16 @@ full = [
 [project.scripts]
 mlheatmap = "mlheatmap.cli:main"
 
-[tool.hatch.build]
-include = [
-    "/src/mlheatmap/data/*.tsv",
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlheatmap"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/src/mlheatmap/data/*.tsv",
+    "/src/mlheatmap",
+    "/tests",
+    "/test_data",
+    "/scripts",
     "/README.md",
     "/LICENSE",
+    "/pyproject.toml",
 ]
