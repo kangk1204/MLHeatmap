@@ -72,7 +72,10 @@ ensure_venv() {
 
   if [[ ! -x "$venv_python" ]]; then
     printf 'Creating virtual environment...\n'
-    "$selected_python" -m venv "$venv_root" || fail "Failed to create .venv with $selected_python."
+    if ! "$selected_python" -m venv "$venv_root"; then
+      install_python_venv_support
+      "$selected_python" -m venv "$venv_root" || fail "Failed to create .venv with $selected_python."
+    fi
   fi
 }
 
@@ -89,7 +92,7 @@ install_application() {
     upgrade_venv_tooling
 
     printf 'Installing MLHeatmap... (attempt %s/2)\n' "$attempt"
-    if "$venv_python" -m pip install -e "$repo_root"; then
+    if "$venv_python" -m pip install "$repo_root"; then
       return 0
     fi
 
@@ -104,13 +107,30 @@ install_application() {
   fail "MLHeatmap installation failed after recreating .venv. Close programs that may lock files in .venv and rerun bash ./install-ubuntu.sh."
 }
 
+install_python_venv_support() {
+  local sudo_cmd=()
+  local package_name="python${selected_version}-venv"
+
+  command -v apt-get >/dev/null 2>&1 || fail "Creating .venv failed and apt-get is unavailable. Install $package_name manually, then rerun bash ./install-ubuntu.sh."
+
+  if [[ $EUID -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || fail "Creating .venv failed and sudo is unavailable. Install $package_name manually, then rerun bash ./install-ubuntu.sh."
+    sudo_cmd=(sudo)
+  fi
+
+  export DEBIAN_FRONTEND=noninteractive
+  printf 'Installing %s for virtual environment support...\n' "$package_name"
+  "${sudo_cmd[@]}" apt-get update || fail "apt-get update failed while preparing virtual environment support."
+  "${sudo_cmd[@]}" apt-get install -y "$package_name" || fail "Failed to install $package_name."
+}
+
 bootstrap_python_install() {
   local sudo_cmd=()
 
-  command -v apt-get >/dev/null 2>&1 || fail "Bootstrap mode requires apt-get. Install Python 3.12 manually and rerun bash ./install-ubuntu.sh."
+  command -v apt-get >/dev/null 2>&1 || fail "A compatible Python interpreter was not found and apt-get is unavailable. Install Python 3.12 manually, then rerun bash ./install-ubuntu.sh."
 
   if [[ $EUID -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || fail "Bootstrap mode requires sudo. Install Python 3.12 manually and rerun bash ./install-ubuntu.sh."
+    command -v sudo >/dev/null 2>&1 || fail "A compatible Python interpreter was not found and sudo is unavailable. Install Python 3.12 manually, then rerun bash ./install-ubuntu.sh."
     sudo_cmd=(sudo)
   fi
 
@@ -126,7 +146,7 @@ bootstrap_python_install() {
     return 0
   fi
 
-  fail "Bootstrap mode could not install Python 3.12 or 3.11. Install one of them manually and rerun bash ./install-ubuntu.sh."
+  fail "Automatic bootstrap could not install Python 3.12 or 3.11. Install one of them manually and rerun bash ./install-ubuntu.sh."
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -149,16 +169,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! select_python; then
-  if [[ $bootstrap_python -eq 0 ]]; then
-    fail "Python 3.11 or 3.12 was not found. Install Python 3.12 manually or rerun bash ./install-ubuntu.sh --bootstrap-python. The installer only creates a local .venv and does not install packages into system site-packages."
-  fi
-
+  printf 'Python 3.11 or 3.12 was not found. Attempting bootstrap install...\n'
   bootstrap_python_install
   select_python || fail "Python bootstrap finished, but no compatible interpreter was detected. Open a new shell and rerun bash ./install-ubuntu.sh."
 fi
 
 printf 'Using %s (Python %s)\n' "$selected_python" "$selected_version"
 install_application
+printf 'Running install self-check...\n'
+"$venv_python" -m mlheatmap --self-check || fail "MLHeatmap self-check failed."
 
 if [[ $no_launch -eq 1 ]]; then
   printf 'Installation completed. Run bash ./run-ubuntu.sh when you want to start the app.\n'

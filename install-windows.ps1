@@ -84,7 +84,7 @@ function Install-Application {
         Upgrade-VenvTooling
 
         Write-Host "Installing MLHeatmap... (attempt $attempt/2)"
-        & $venvPython -m pip install -e $repoRoot
+        & $venvPython -m pip install $repoRoot
         if ($LASTEXITCODE -eq 0) {
             return
         }
@@ -98,6 +98,14 @@ function Install-Application {
     }
 
     Fail "MLHeatmap installation failed after recreating .venv. Close programs that may lock files in .venv and rerun install-windows.cmd."
+}
+
+function Invoke-SelfCheck {
+    Write-Host "Running install self-check..."
+    & $venvPython -m mlheatmap --self-check
+    if ($LASTEXITCODE -ne 0) {
+        Fail "MLHeatmap self-check failed."
+    }
 }
 
 function Get-PythonMinorVersion {
@@ -165,7 +173,7 @@ function Get-CompatiblePython {
 function Install-BootstrapPython {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if (-not $winget) {
-        Fail "Bootstrap mode requires winget, but winget is not available. Install Python 3.12 manually from https://www.python.org/downloads/windows/ and rerun install-windows.cmd."
+        Fail "A compatible Python interpreter was not found and winget is unavailable. Install Python 3.12 manually from https://www.python.org/downloads/windows/ and rerun install-windows.cmd."
     }
 
     Write-Host "Installing Python 3.12 for the current user with winget..."
@@ -179,12 +187,31 @@ function Install-BootstrapPython {
     Start-Sleep -Seconds 2
 }
 
-$python = Get-CompatiblePython
-if (-not $python) {
-    if (-not $BootstrapPython) {
-        Fail "Python 3.11 or 3.12 was not found. Install Python 3.12 from https://www.python.org/downloads/windows/ or rerun install-windows.cmd --bootstrap-python. The installer itself only creates a local .venv and does not install packages into global site-packages."
+function Wait-HttpReady {
+    param(
+        [string]$Url,
+        [int]$TimeoutSeconds = 45
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                return $true
+            }
+        } catch {
+        }
+
+        Start-Sleep -Seconds 1
     }
 
+    return $false
+}
+
+$python = Get-CompatiblePython
+if (-not $python) {
+    Write-Host "Python 3.11 or 3.12 was not found. Attempting bootstrap install..."
     Install-BootstrapPython
     $python = Get-CompatiblePython
     if (-not $python) {
@@ -194,6 +221,7 @@ if (-not $python) {
 
 Write-Host "Using $($python.Label) (Python $($python.Version))"
 Install-Application -Python $python
+Invoke-SelfCheck
 
 if ($NoLaunch) {
     Write-Host "Installation completed. Run .\run-windows.cmd when you want to start the app."
@@ -201,6 +229,8 @@ if ($NoLaunch) {
 }
 
 Write-Host "Starting MLHeatmap at http://127.0.0.1:8765 ..."
-Start-Process -FilePath $venvPython -ArgumentList @("-m", "mlheatmap") -WorkingDirectory $repoRoot
-Start-Sleep -Seconds 3
+Start-Process -FilePath $venvPython -ArgumentList @("-m", "mlheatmap", "--no-browser") -WorkingDirectory $repoRoot | Out-Null
+if (-not (Wait-HttpReady -Url "http://127.0.0.1:8765/api/v1/capabilities")) {
+    Fail "MLHeatmap started, but the local server did not become ready at http://127.0.0.1:8765 within 45 seconds."
+}
 Start-Process "http://127.0.0.1:8765"
