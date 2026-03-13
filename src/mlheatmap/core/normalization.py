@@ -17,7 +17,9 @@ def deseq2_normalize(counts: np.ndarray, return_size_factors: bool = False):
     counts = counts.astype(np.float64)
 
     # Step 1: Geometric mean per gene (log-space to avoid overflow)
-    log_counts = np.where(counts > 0, np.log(counts), np.nan)
+    log_counts = np.full(counts.shape, np.nan, dtype=np.float64)
+    positive_mask = counts > 0
+    log_counts[positive_mask] = np.log(counts[positive_mask])
     geo_mean_log = np.nanmean(log_counts, axis=1)
     valid = np.isfinite(geo_mean_log)
     geo_means = np.exp(geo_mean_log)

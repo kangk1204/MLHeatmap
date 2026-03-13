@@ -91,7 +91,7 @@ install_application() {
     upgrade_venv_tooling
 
     printf 'Installing MLHeatmap... (attempt %s/2)\n' "$attempt"
-    if "$venv_python" -m pip install -e "$repo_root"; then
+    if "$venv_python" -m pip install "$repo_root"; then
       return 0
     fi
 
@@ -114,7 +114,7 @@ bootstrap_python_install() {
   elif command -v brew >/dev/null 2>&1; then
     brew_cmd="$(command -v brew)"
   else
-    fail "Bootstrap mode requires Homebrew. Install Homebrew first, then rerun bash ./install-macos.sh --bootstrap-python."
+    fail "A compatible Python interpreter was not found and Homebrew is unavailable. Install Homebrew or Python 3.12 manually, then rerun bash ./install-macos.sh."
   fi
 
   printf 'Installing Python 3.12 with Homebrew...\n'
@@ -145,16 +145,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! select_python; then
-  if [[ $bootstrap_python -eq 0 ]]; then
-    fail "Python 3.11 or 3.12 was not found. Install Python 3.12 manually or rerun bash ./install-macos.sh --bootstrap-python. The installer only creates a local .venv and does not install packages into global site-packages."
-  fi
-
+  printf 'Python 3.11 or 3.12 was not found. Attempting bootstrap install...\n'
   bootstrap_python_install
   select_python || fail "Python bootstrap finished, but no compatible interpreter was detected. Open a new shell and rerun bash ./install-macos.sh."
 fi
 
 printf 'Using %s (Python %s)\n' "$selected_python" "$selected_version"
 install_application
+printf 'Running install self-check...\n'
+"$venv_python" -m mlheatmap --self-check || fail "MLHeatmap self-check failed."
 
 if [[ $no_launch -eq 1 ]]; then
   printf 'Installation completed. Run bash ./run-macos.sh when you want to start the app.\n'

@@ -28,15 +28,7 @@ From `cmd.exe`, run:
 install-windows.cmd
 ```
 
-The script reuses an existing Python `3.12` or `3.11`, creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app, and starts MLHeatmap. It does not install packages into the user's global Python environment.
-
-If Python is not installed yet, you can bootstrap a per-user Python `3.12` with:
-
-```bat
-install-windows.cmd --bootstrap-python
-```
-
-Bootstrap mode installs Python for the current user via `winget`, then continues with the same local `.venv` setup.
+The script reuses an existing Python `3.12` or `3.11`, or bootstraps Python `3.12` automatically with `winget` when no compatible interpreter is present. It creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app as a regular package, runs a self-check, and starts MLHeatmap. It does not install Python packages into the user's global environment.
 
 After installation, you can start the app again with:
 
@@ -58,15 +50,7 @@ Run from the repo root:
 bash ./install-ubuntu.sh
 ```
 
-The script reuses an existing Python `3.12` or `3.11`, creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app, and starts MLHeatmap. It does not install packages into the system Python environment.
-
-If Python is not installed yet, you can bootstrap it with:
-
-```bash
-bash ./install-ubuntu.sh --bootstrap-python
-```
-
-Bootstrap mode uses `apt-get` to install Python `3.12` or `3.11`, then continues with the same local `.venv` setup.
+The script reuses an existing Python `3.12` or `3.11`, or bootstraps one automatically with `apt-get` when no compatible interpreter is present. If the selected interpreter is missing `venv` support, the installer also adds the matching `python3.x-venv` package automatically. It creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app as a regular package, runs a self-check, and starts MLHeatmap. It does not install Python packages into the system Python environment.
 
 After installation, you can start the app again with:
 
@@ -88,15 +72,7 @@ Run from the repo root:
 bash ./install-macos.sh
 ```
 
-The script reuses an existing Python `3.12` or `3.11`, creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app, and starts MLHeatmap. It does not install packages into the user's global Python environment.
-
-If Python is not installed yet, you can bootstrap it with:
-
-```bash
-bash ./install-macos.sh --bootstrap-python
-```
-
-Bootstrap mode uses Homebrew to install Python `3.12`, then continues with the same local `.venv` setup.
+The script reuses an existing Python `3.12` or `3.11`, or bootstraps Python `3.12` automatically with Homebrew when no compatible interpreter is present. It creates a local `.venv`, recreates that `.venv` if it was built with the wrong version or became corrupted, installs the app as a regular package, runs a self-check, and starts MLHeatmap. It does not install Python packages into the user's global Python environment.
 
 After installation, you can start the app again with:
 

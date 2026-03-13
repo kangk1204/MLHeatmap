@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mlheatmap"
-version = "0.1.0"
+version = "1.0.0"
 description = "Interactive RNA-seq heatmap and biomarker discovery tool"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["rnaseq", "heatmap", "biomarker", "shap", "bioinformatics"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Programming Language :: Python :: 3",
@@ -44,6 +44,13 @@ full = [
 [project.scripts]
 mlheatmap = "mlheatmap.cli:main"
 
+[tool.hatch.build]
+exclude = [
+    "/figures/**",
+    "/test_data/geo/**",
+    "/src/mlheatmap/data/*.tsv.gz",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mlheatmap"]
 
@@ -53,6 +60,14 @@ include = [
     "/tests",
     "/test_data",
     "/scripts",
+    "/install-macos.sh",
+    "/install-ubuntu.sh",
+    "/install-windows.cmd",
+    "/install-windows.ps1",
+    "/run-macos.sh",
+    "/run-ubuntu.sh",
+    "/run-windows.cmd",
+    "/Dockerfile",
     "/README.md",
     "/LICENSE",
     "/pyproject.toml",
