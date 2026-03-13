@@ -5,6 +5,7 @@ const Biomarker = {
     _mlRunToken: 0,
     _degRunToken: 0,
     _pendingDegRequest: false,
+    _degPinnedGenes: new Set(),
 
     _escapeHtml(str) {
         const div = document.createElement('div');
@@ -66,6 +67,18 @@ const Biomarker = {
             modelSelect.addEventListener('change', () => this._updateModelParams());
             this._updateModelParams();
         }
+
+        ['deg-show-labels', 'deg-label-count'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const eventName = el.type === 'checkbox' ? 'change' : 'input';
+            el.addEventListener(eventName, () => this._rerenderDegPlots());
+        });
+
+        const clearPinsBtn = document.getElementById('deg-clear-pins');
+        if (clearPinsBtn) {
+            clearPinsBtn.addEventListener('click', () => this._clearPinnedDegGenes());
+        }
     },
 
     applyCapabilities(capabilities) {
@@ -124,6 +137,198 @@ const Biomarker = {
             // Default: second group as reference (common convention: control is often second)
             sel.value = groups[1];
         }
+    },
+
+    _rerenderDegVolcano() {
+        this._rerenderDegPlots();
+    },
+
+    _rerenderDegPlots() {
+        if (!App.state.degResults) return;
+        this.plotVolcano(App.state.degResults);
+        this.plotMa(App.state.degResults);
+    },
+
+    _clearPinnedDegGenes() {
+        this._degPinnedGenes = new Set();
+        this._updateVolcanoPinUi();
+        this._rerenderDegPlots();
+    },
+
+    _updateVolcanoPinUi() {
+        const btn = document.getElementById('deg-clear-pins');
+        if (!btn) return;
+        const count = this._degPinnedGenes?.size || 0;
+        btn.disabled = count === 0;
+        btn.textContent = count > 0 ? `Clear pinned (${count})` : 'Clear pinned';
+    },
+
+    _getVolcanoLabelSettings() {
+        const enabled = document.getElementById('deg-show-labels')?.checked ?? true;
+        const input = document.getElementById('deg-label-count');
+        const parsed = Number.parseInt(input?.value ?? '12', 10);
+        const count = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), 30) : 12;
+        if (input) input.value = String(count);
+        return { enabled, count };
+    },
+
+    _volcanoLabelScore(gene, fcThresh) {
+        const significanceBoost = gene.direction !== 'ns' ? 40 : 0;
+        const effectScore = Math.abs(gene.log2fc) / Math.max(fcThresh, 0.25);
+        return significanceBoost + (gene.neg_log10_p * 3) + effectScore;
+    },
+
+    _selectVolcanoLabels(results, fcThresh, topN) {
+        if (topN <= 0) return [];
+
+        const rankSubset = subset => [...subset].sort(
+            (a, b) => this._volcanoLabelScore(b, fcThresh) - this._volcanoLabelScore(a, fcThresh),
+        );
+        const picks = [];
+        const pushUnique = gene => {
+            if (!gene || picks.some(existing => existing.gene === gene.gene)) return;
+            picks.push(gene);
+        };
+
+        const up = rankSubset(results.filter(r => r.direction === 'up'));
+        const down = rankSubset(results.filter(r => r.direction === 'down'));
+        const leftTarget = Math.floor(topN / 2);
+        const rightTarget = topN - leftTarget;
+        up.slice(0, rightTarget).forEach(pushUnique);
+        down.slice(0, leftTarget).forEach(pushUnique);
+
+        const rankedSource = results.filter(r => r.direction !== 'ns');
+        const source = rankedSource.length > 0 ? rankedSource : results;
+        rankSubset(source).forEach(pushUnique);
+        return picks.slice(0, topN);
+    },
+
+    _mergePinnedAndAutoLabels(results, fcThresh) {
+        const pinnedGenes = results
+            .filter(gene => this._degPinnedGenes?.has(gene.gene))
+            .map(gene => ({ ...gene, pinned: true }));
+
+        const { enabled, count } = this._getVolcanoLabelSettings();
+        if (!enabled) return pinnedGenes;
+
+        const autoGenes = this._selectVolcanoLabels(results, fcThresh, count)
+            .filter(gene => !this._degPinnedGenes?.has(gene.gene))
+            .map(gene => ({ ...gene, pinned: false }));
+
+        return [...pinnedGenes, ...autoGenes];
+    },
+
+    _buildVolcanoAnnotations(labelGenes, clampY) {
+        const laneOffsets = [36, 52, 68, 84];
+        const laneHeights = [18, 30, 42, 54];
+        const laneState = { left: 0, right: 0 };
+
+        return labelGenes.map(gene => {
+            const side = gene.log2fc >= 0 ? 'right' : 'left';
+            const laneIndex = laneState[side] % laneOffsets.length;
+            const stackIndex = Math.floor(laneState[side] / laneOffsets.length);
+            laneState[side] += 1;
+
+            const axBase = laneOffsets[laneIndex] + (stackIndex * 14);
+            const ayBase = laneHeights[laneIndex] + (stackIndex * 8);
+            const accent = gene.pinned
+                ? '#f59e0b'
+                : gene.direction === 'up'
+                    ? '#ef4444'
+                    : gene.direction === 'down'
+                        ? '#3b82f6'
+                        : '#94a3b8';
+
+            return {
+                x: gene.log2fc,
+                y: clampY(gene.neg_log10_p),
+                xref: 'x',
+                yref: 'y',
+                text: this._escapeHtml(gene.pinned ? `★ ${gene.gene}` : gene.gene),
+                showarrow: true,
+                arrowhead: 0,
+                arrowsize: 1,
+                arrowwidth: gene.pinned ? 1.5 : 1,
+                arrowcolor: accent,
+                ax: side === 'right' ? axBase : -axBase,
+                ay: -ayBase,
+                xanchor: side === 'right' ? 'left' : 'right',
+                align: side === 'right' ? 'left' : 'right',
+                bgcolor: gene.pinned ? 'rgba(120,53,15,0.96)' : 'rgba(15,23,42,0.92)',
+                bordercolor: accent,
+                borderwidth: 1,
+                borderpad: 4,
+                font: { size: gene.pinned ? 11 : 10, color: '#e5e7eb' },
+            };
+        });
+    },
+
+    _buildMaAnnotations(labelGenes) {
+        return labelGenes.map((gene, idx) => {
+            const accent = gene.pinned
+                ? '#f59e0b'
+                : gene.direction === 'up'
+                    ? '#ef4444'
+                    : gene.direction === 'down'
+                        ? '#3b82f6'
+                        : '#94a3b8';
+            const side = gene.log2fc >= 0 ? 'right' : 'left';
+            const axBase = 32 + ((idx % 4) * 10);
+            const ayBase = 26 + (Math.floor(idx / 4) * 10);
+
+            return {
+                x: gene.mean_a,
+                y: gene.log2fc,
+                xref: 'x',
+                yref: 'y',
+                text: this._escapeHtml(gene.pinned ? `★ ${gene.gene}` : gene.gene),
+                showarrow: true,
+                arrowhead: 0,
+                arrowsize: 1,
+                arrowwidth: gene.pinned ? 1.5 : 1,
+                arrowcolor: accent,
+                ax: side === 'right' ? axBase : -axBase,
+                ay: -ayBase,
+                xanchor: side === 'right' ? 'left' : 'right',
+                align: side === 'right' ? 'left' : 'right',
+                bgcolor: gene.pinned ? 'rgba(120,53,15,0.96)' : 'rgba(15,23,42,0.92)',
+                bordercolor: accent,
+                borderwidth: 1,
+                borderpad: 4,
+                font: { size: gene.pinned ? 11 : 10, color: '#e5e7eb' },
+            };
+        });
+    },
+
+    _bindDegPointPinning(elementId) {
+        const plotEl = document.getElementById(elementId);
+        if (!plotEl || typeof plotEl.on !== 'function') return;
+
+        if (plotEl._degClickHandler && typeof plotEl.removeListener === 'function') {
+            plotEl.removeListener('plotly_click', plotEl._degClickHandler);
+        }
+
+        plotEl._degClickHandler = event => {
+            const gene = event?.points?.[0]?.text;
+            if (!gene) return;
+
+            if (this._degPinnedGenes.has(gene)) {
+                this._degPinnedGenes.delete(gene);
+            } else {
+                this._degPinnedGenes.add(gene);
+            }
+
+            this._updateVolcanoPinUi();
+            this._rerenderDegPlots();
+        };
+
+        plotEl.on('plotly_click', plotEl._degClickHandler);
+    },
+
+    _degMethodHint(data) {
+        const testLabel = data.method === 'ttest' ? "Welch's t-test" : 'Wilcoxon rank-sum';
+        const pLabel = data.pvalue_type === 'raw' ? 'raw p-values' : 'FDR-adjusted p-values';
+        return `${testLabel} on normalized expression using ${pLabel}. This is not DESeq2's negative-binomial shrinkage workflow, so volcano and MA geometry can differ. Click any point to pin or unpin its label.`;
     },
 
     _updateModelParams() {
@@ -662,10 +867,21 @@ const Biomarker = {
             summaryEl.appendChild(wrapper);
         });
 
-        // Volcano plot
-        this.plotVolcano(data);
+        this._degPinnedGenes = new Set();
+        this._updateVolcanoPinUi();
 
-        // DEG table
+        const degMethodHint = document.getElementById('deg-method-hint');
+        if (degMethodHint) degMethodHint.textContent = this._degMethodHint(data);
+
+        const maMethodHint = document.getElementById('ma-method-hint');
+        if (maMethodHint) {
+            maMethodHint.textContent = 'M = log2FC, A = mean normalized expression. Use this with the volcano plot to compare effect size against abundance.';
+        }
+
+        this.plotVolcano(data);
+        this.plotMa(data);
+        this.plotDegSummaryBar(data);
+
         this.populateDegTable(data.results, comp);
     },
 
@@ -731,22 +947,40 @@ const Biomarker = {
             makeTrace(down, downName, '#3b82f6', 7, 0.85),
         ];
 
-        // Top gene labels
-        const sigGenes = [...up, ...down].sort((a, b) => {
-            const pa = isRawP ? a.pvalue : a.adj_pvalue;
-            const pb = isRawP ? b.pvalue : b.adj_pvalue;
-            return pa - pb;
-        }).slice(0, 10);
-        if (sigGenes.length > 0) {
+        const labelGenes = this._mergePinnedAndAutoLabels(results, fcThresh);
+        const autoLabelGenes = labelGenes.filter(gene => !gene.pinned);
+        const pinnedGenes = labelGenes.filter(gene => gene.pinned);
+        if (autoLabelGenes.length > 0) {
             traces.push({
-                x: sigGenes.map(r => r.log2fc),
-                y: sigGenes.map(r => clampY(r.neg_log10_p)),
-                text: sigGenes.map(r => r.gene),
-                mode: 'text',
-                textposition: 'top center',
-                textfont: { size: 9, color: '#e2e8f0' },
+                x: autoLabelGenes.map(r => r.log2fc),
+                y: autoLabelGenes.map(r => clampY(r.neg_log10_p)),
+                text: autoLabelGenes.map(r => r.gene),
+                customdata: autoLabelGenes.map(r => r.neg_log10_p),
+                mode: 'markers',
+                marker: {
+                    size: 10,
+                    color: 'rgba(15,23,42,0.0)',
+                    line: { color: '#f8fafc', width: 1.5 },
+                },
                 showlegend: false,
-                hoverinfo: 'skip',
+                hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{customdata:.2f}<extra></extra>`,
+            });
+        }
+        if (pinnedGenes.length > 0) {
+            traces.push({
+                x: pinnedGenes.map(r => r.log2fc),
+                y: pinnedGenes.map(r => clampY(r.neg_log10_p)),
+                text: pinnedGenes.map(r => r.gene),
+                customdata: pinnedGenes.map(r => r.neg_log10_p),
+                mode: 'markers',
+                marker: {
+                    size: 12,
+                    color: 'rgba(245,158,11,0.18)',
+                    line: { color: '#f59e0b', width: 2 },
+                    symbol: 'circle-open',
+                },
+                showlegend: false,
+                hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{customdata:.2f}<extra></extra>`,
             });
         }
 
@@ -756,7 +990,15 @@ const Biomarker = {
 
         // Compute y range with padding for top gene labels
         const maxNlp = needsCap ? adaptiveCap : Math.max(...allNlpRaw, negLog10PThresh + 1);
-        const yPadding = maxNlp * 0.12;  // 12% padding for text labels
+        const yPadding = labelGenes.length > 0 ? Math.max(maxNlp * 0.2, 3) : (maxNlp * 0.12);
+        const annotations = [
+            ...(needsCap ? [{
+                x: 1, xref: 'paper', y: adaptiveCap, yanchor: 'bottom',
+                text: `capped (\u25C6 = higher)`,
+                showarrow: false, font: { size: 9, color: 'rgba(251,191,36,0.6)' },
+            }] : []),
+            ...this._buildVolcanoAnnotations(labelGenes, clampY),
+        ];
 
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
@@ -775,7 +1017,7 @@ const Biomarker = {
                 range: [-0.5, maxNlp + yPadding],
             },
             legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.3)', font: { size: 10 } },
-            margin: { l: 60, r: 20, t: 10, b: 60 },
+            margin: { l: labelGenes.length > 0 ? 90 : 60, r: labelGenes.length > 0 ? 90 : 20, t: 10, b: 60 },
             shapes: [
                 // Vertical FC thresholds
                 { type: 'line', x0: fcThresh, x1: fcThresh, y0: 0, y1: 1, yref: 'paper', line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
@@ -789,14 +1031,169 @@ const Biomarker = {
                     line: { color: 'rgba(251,191,36,0.3)', dash: 'dot', width: 1 },
                 }] : []),
             ],
-            annotations: needsCap ? [{
-                x: 1, xref: 'paper', y: adaptiveCap, yanchor: 'bottom',
-                text: `capped (\u25C6 = higher)`,
-                showarrow: false, font: { size: 9, color: 'rgba(251,191,36,0.6)' },
-            }] : [],
+            annotations,
         };
 
-        Plotly.newPlot('volcano-plot', traces, layout, {
+        return Plotly.newPlot('volcano-plot', traces, layout, {
+            responsive: true, displayModeBar: false,
+        }).then(() => {
+            this._bindDegPointPinning('volcano-plot');
+        });
+    },
+
+    plotMa(data) {
+        const fcThresh = data.thresholds.log2fc;
+        const isRawP = data.pvalue_type === 'raw';
+        const pLabel = isRawP ? 'P-value' : 'FDR';
+        const comp = data.comparison_group || '';
+        const ref = data.reference_group || '';
+        const compSafe = this._escapeHtml(comp);
+        const refSafe = this._escapeHtml(ref);
+        const results = data.results.map(result => ({
+            ...result,
+            mean_a: (Number(result.mean_g1 ?? 0) + Number(result.mean_g2 ?? 0)) / 2,
+        }));
+
+        const up = results.filter(r => r.direction === 'up');
+        const down = results.filter(r => r.direction === 'down');
+        const ns = results.filter(r => r.direction === 'ns');
+        const labelGenes = this._mergePinnedAndAutoLabels(results, fcThresh);
+        const autoLabelGenes = labelGenes.filter(gene => !gene.pinned);
+        const pinnedGenes = labelGenes.filter(gene => gene.pinned);
+        const allAValues = results.map(r => r.mean_a);
+        const maxAbsFc = Math.max(
+            fcThresh + 0.5,
+            ...results.map(r => Math.abs(r.log2fc)),
+        );
+        const minA = Math.min(...allAValues);
+        const maxA = Math.max(...allAValues);
+        const aPad = Math.max((maxA - minA) * 0.08, 0.5);
+
+        const makeTrace = (subset, name, color, size, opacity) => ({
+            x: subset.map(r => r.mean_a),
+            y: subset.map(r => r.log2fc),
+            text: subset.map(r => r.gene),
+            customdata: subset.map(r => [r.mean_g1, r.mean_g2, r.pvalue, r.adj_pvalue]),
+            mode: 'markers',
+            name: `${name} (${subset.length})`,
+            marker: { color, size, opacity },
+            hovertemplate: `<b>%{text}</b><br>A: %{x:.3f}<br>M (log2FC): %{y:.3f}<br>${compSafe || 'Group 1'} mean: %{customdata[0]:.3f}<br>${refSafe || 'Group 2'} mean: %{customdata[1]:.3f}<br>${pLabel}: %{customdata[${isRawP ? 2 : 3}]:.3e}<extra></extra>`,
+        });
+
+        const upName = compSafe ? `Up in ${compSafe}` : 'Up';
+        const downName = compSafe ? `Down in ${compSafe}` : 'Down';
+        const traces = [
+            makeTrace(ns, 'NS', '#6b7280', 5, 0.45),
+            makeTrace(up, upName, '#ef4444', 7, 0.85),
+            makeTrace(down, downName, '#3b82f6', 7, 0.85),
+        ];
+
+        if (autoLabelGenes.length > 0) {
+            traces.push({
+                x: autoLabelGenes.map(r => r.mean_a),
+                y: autoLabelGenes.map(r => r.log2fc),
+                text: autoLabelGenes.map(r => r.gene),
+                customdata: autoLabelGenes.map(r => [r.mean_g1, r.mean_g2, r.pvalue, r.adj_pvalue]),
+                mode: 'markers',
+                marker: {
+                    size: 10,
+                    color: 'rgba(15,23,42,0.0)',
+                    line: { color: '#f8fafc', width: 1.5 },
+                },
+                showlegend: false,
+                hovertemplate: `<b>%{text}</b><br>A: %{x:.3f}<br>M (log2FC): %{y:.3f}<br>${pLabel}: %{customdata[${isRawP ? 2 : 3}]:.3e}<extra></extra>`,
+            });
+        }
+        if (pinnedGenes.length > 0) {
+            traces.push({
+                x: pinnedGenes.map(r => r.mean_a),
+                y: pinnedGenes.map(r => r.log2fc),
+                text: pinnedGenes.map(r => r.gene),
+                customdata: pinnedGenes.map(r => [r.mean_g1, r.mean_g2, r.pvalue, r.adj_pvalue]),
+                mode: 'markers',
+                marker: {
+                    size: 12,
+                    color: 'rgba(245,158,11,0.18)',
+                    line: { color: '#f59e0b', width: 2 },
+                    symbol: 'circle-open',
+                },
+                showlegend: false,
+                hovertemplate: `<b>%{text}</b><br>A: %{x:.3f}<br>M (log2FC): %{y:.3f}<br>${pLabel}: %{customdata[${isRawP ? 2 : 3}]:.3e}<extra></extra>`,
+            });
+        }
+
+        const layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 11 },
+            xaxis: {
+                title: { text: 'A = mean normalized expression', font: { size: 12 } },
+                gridcolor: 'rgba(255,255,255,0.04)',
+                zeroline: false,
+                range: [minA - aPad, maxA + aPad],
+            },
+            yaxis: {
+                title: { text: 'M = log2 fold change', font: { size: 12 } },
+                gridcolor: 'rgba(255,255,255,0.04)',
+                zeroline: false,
+                range: [-(maxAbsFc * 1.12), maxAbsFc * 1.12],
+            },
+            legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.3)', font: { size: 10 } },
+            margin: { l: 70, r: labelGenes.length > 0 ? 90 : 24, t: 10, b: 60 },
+            shapes: [
+                { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: { color: 'rgba(255,255,255,0.18)', width: 1 } },
+                { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: fcThresh, y1: fcThresh, line: { color: 'rgba(239,68,68,0.28)', dash: 'dash', width: 1 } },
+                { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: -fcThresh, y1: -fcThresh, line: { color: 'rgba(59,130,246,0.28)', dash: 'dash', width: 1 } },
+            ],
+            annotations: this._buildMaAnnotations(labelGenes),
+        };
+
+        return Plotly.newPlot('ma-plot', traces, layout, {
+            responsive: true, displayModeBar: false,
+        }).then(() => {
+            this._bindDegPointPinning('ma-plot');
+        });
+    },
+
+    plotDegSummaryBar(data) {
+        const comp = data.comparison_group || '';
+        const upLabel = comp ? `Up in ${comp}` : 'Up';
+        const downLabel = comp ? `Down in ${comp}` : 'Down';
+        const summary = data.summary || {};
+        const counts = [
+            summary.n_up || 0,
+            summary.n_down || 0,
+            summary.n_not_significant || 0,
+        ];
+
+        return Plotly.newPlot('deg-bar-plot', [{
+            type: 'bar',
+            x: [upLabel, downLabel, 'NS'],
+            y: counts,
+            text: counts.map(value => String(value)),
+            textposition: 'outside',
+            cliponaxis: false,
+            marker: {
+                color: ['#ef4444', '#3b82f6', '#6b7280'],
+                line: {
+                    color: ['rgba(239,68,68,0.9)', 'rgba(59,130,246,0.9)', 'rgba(148,163,184,0.9)'],
+                    width: 1,
+                },
+            },
+            hovertemplate: '%{x}: %{y}<extra></extra>',
+        }], {
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 11 },
+            margin: { l: 50, r: 20, t: 10, b: 50 },
+            xaxis: { tickfont: { size: 11 } },
+            yaxis: {
+                title: { text: 'Gene count', font: { size: 12 } },
+                gridcolor: 'rgba(255,255,255,0.04)',
+                zeroline: false,
+            },
+            showlegend: false,
+        }, {
             responsive: true, displayModeBar: false,
         });
     },

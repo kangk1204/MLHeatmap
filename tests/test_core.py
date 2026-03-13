@@ -56,13 +56,18 @@ class TestNormalization:
         assert np.all(np.isfinite(result))
 
     def test_deseq2_normalize_with_zeros(self):
+        import warnings
+
         from mlheatmap.core.normalization import deseq2_normalize
 
         counts = np.array([[0, 100, 200], [0, 0, 300], [50, 50, 50]], dtype=float)
-        result = deseq2_normalize(counts)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = deseq2_normalize(counts)
 
         assert result.shape == counts.shape
         assert np.all(np.isfinite(result))
+        assert not any(item.category is RuntimeWarning for item in caught)
 
 
 class TestClustering:
