@@ -1,23 +1,32 @@
 """CLI entry point for mlheatmap."""
 
 import argparse
-import platform
+from pathlib import Path
 import subprocess
-import sys
 import threading
 import webbrowser
 
 
-def _open_browser(url: str) -> None:
-    """Open browser, with WSL2 support."""
+def _is_wsl() -> bool:
+    """Detect Windows Subsystem for Linux."""
+    proc_version = Path("/proc/version")
+    if not proc_version.exists():
+        return False
     try:
-        with open("/proc/version", "r") as f:
-            if "microsoft" in f.read().lower():
-                subprocess.Popen(["cmd.exe", "/c", "start", url],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return
-    except FileNotFoundError:
-        pass
+        return "microsoft" in proc_version.read_text(encoding="utf-8").lower()
+    except OSError:
+        return False
+
+
+def _open_browser(url: str) -> None:
+    """Open the app URL in a browser on native OSes and WSL."""
+    if _is_wsl():
+        subprocess.Popen(
+            ["cmd.exe", "/c", "start", "", url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
     webbrowser.open(url)
 
 

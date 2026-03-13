@@ -7,11 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from mlheatmap import __version__
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="MLHeatmap", version="0.1.0")
+    app = FastAPI(title="MLHeatmap", version=__version__)
 
     app.add_middleware(
         CORSMiddleware,
@@ -25,8 +27,9 @@ def create_app() -> FastAPI:
     app.state.sessions = SessionStore()
 
     # API routers
-    from mlheatmap.api import upload, gene_mapping, normalize, heatmap, groups, biomarker, export
-    for router_module in [upload, gene_mapping, normalize, heatmap, groups, biomarker, export]:
+    from mlheatmap.api import biomarker, capabilities, export, gene_mapping, groups, heatmap, normalize, upload
+
+    for router_module in [capabilities, upload, gene_mapping, normalize, heatmap, groups, biomarker, export]:
         app.include_router(router_module.router, prefix="/api/v1")
 
     # Static files

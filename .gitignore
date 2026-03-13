@@ -24,7 +24,6 @@ env/
 Thumbs.db
 
 # Data files (large)
-*.tsv.gz
 gene_tables/
 
 # Claude
