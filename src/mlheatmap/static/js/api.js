@@ -2,6 +2,12 @@
 const API = {
     baseUrl: '/api/v1',
 
+    async getCapabilities() {
+        const res = await fetch(`${this.baseUrl}/capabilities`);
+        if (!res.ok) throw new Error((await res.json()).error || 'Capabilities request failed');
+        return res.json();
+    },
+
     async upload(file) {
         const formData = new FormData();
         formData.append('file', file);

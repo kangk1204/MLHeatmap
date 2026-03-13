@@ -13,6 +13,8 @@ from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
 
+from mlheatmap.core.capabilities import normalize_model_name
+
 
 # ──────────────────────────────────────────────────────────
 # Model factory
@@ -20,7 +22,7 @@ from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
 
 def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100):
     """Return (clf, use_shap_tree, needs_scaling) for the requested model."""
-    model_name = model_name.lower().replace(" ", "_")
+    model_name = normalize_model_name(model_name)
 
     if model_name in ("rf", "random_forest"):
         from sklearn.ensemble import RandomForestClassifier
@@ -36,8 +38,14 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
         )
         return clf, True, False
 
-    if model_name in ("xgboost", "xgb"):
-        from xgboost import XGBClassifier
+    if model_name == "xgboost":
+        try:
+            from xgboost import XGBClassifier
+        except ImportError as exc:
+            raise ImportError(
+                "XGBoost is not available in this installation. "
+                "Install mlheatmap[full] or use Docker for the full model set."
+            ) from exc
         # Aggressively constrain for small sample sizes
         if n_samples < 20:
             n_est = min(n_estimators, 50)
@@ -68,8 +76,14 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
         )
         return clf, True, False
 
-    if model_name in ("lightgbm", "lgbm"):
-        from lightgbm import LGBMClassifier
+    if model_name == "lightgbm":
+        try:
+            from lightgbm import LGBMClassifier
+        except ImportError as exc:
+            raise ImportError(
+                "LightGBM is not available in this installation. "
+                "Install mlheatmap[full] or use Docker for the full model set."
+            ) from exc
         # Aggressively constrain for small sample sizes to prevent overfitting
         if n_samples < 20:
             n_est = min(n_estimators, 50)
@@ -110,7 +124,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
         )
         return clf, True, False
 
-    if model_name in ("logistic_regression", "logistic", "lr_l1"):
+    if model_name == "logistic_regression":
         from sklearn.linear_model import LogisticRegression
         clf = LogisticRegression(
             penalty="l1",
@@ -123,7 +137,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
         )
         return clf, False, True
 
-    if model_name in ("svm", "svm_linear", "linear_svm"):
+    if model_name == "svm_linear":
         from sklearn.svm import SVC
         clf = SVC(
             kernel="linear",
@@ -140,21 +154,15 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
 def _model_display_name(model_name: str) -> str:
     """Human-readable model name."""
+    model_name = normalize_model_name(model_name)
     names = {
         "rf": "Random Forest",
-        "random_forest": "Random Forest",
         "xgboost": "XGBoost",
-        "xgb": "XGBoost",
         "lightgbm": "LightGBM",
-        "lgbm": "LightGBM",
         "logistic_regression": "Logistic Regression (L1)",
-        "logistic": "Logistic Regression (L1)",
-        "lr_l1": "Logistic Regression (L1)",
-        "svm": "SVM (Linear)",
         "svm_linear": "SVM (Linear)",
-        "linear_svm": "SVM (Linear)",
     }
-    return names.get(model_name.lower().replace(" ", "_"), model_name)
+    return names.get(model_name, model_name)
 
 
 # ──────────────────────────────────────────────────────────

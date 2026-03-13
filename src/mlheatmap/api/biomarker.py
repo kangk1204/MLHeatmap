@@ -1,10 +1,16 @@
 """Biomarker discovery API endpoints."""
 
+from __future__ import annotations
+
 import asyncio
 import json
+import traceback
+
 import numpy as np
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
+from mlheatmap.core.capabilities import MODEL_SPECS, get_model_capability, normalize_model_name
 
 router = APIRouter(tags=["biomarker"])
 
@@ -14,6 +20,26 @@ def _stale_inputs_response():
         {"error": "Analysis inputs changed during computation. Rerun with the current settings."},
         status_code=409,
     )
+
+
+def _build_sample_groups(session) -> tuple[dict[str, list[int]] | None, str | None]:
+    if len(session.groups) < 2:
+        return None, "Need at least 2 groups"
+
+    sample_groups: dict[str, list[int]] = {}
+    for group, samples in session.groups.items():
+        for sample in samples:
+            if sample in session.sample_names and sample not in session.excluded_samples:
+                sample_groups.setdefault(group, []).append(session.sample_names.index(sample))
+
+    if len(sample_groups) < 2:
+        return None, f"Only {len(sample_groups)} group(s) have valid samples after exclusion; need at least 2"
+
+    for group_name, indices in sample_groups.items():
+        if len(indices) < 2:
+            return None, f"Group '{group_name}' has only {len(indices)} sample(s) after exclusion; need at least 2"
+
+    return sample_groups, None
 
 
 @router.get("/biomarker/stream")
@@ -31,51 +57,31 @@ async def biomarker_stream(
     if not session or session.normalized is None:
         return JSONResponse({"error": "No normalized data"}, status_code=404)
 
-    def validate_request():
-        if len(session.groups) < 2:
-            return None, "Need at least 2 groups"
+    sample_groups, validation_error = _build_sample_groups(session)
+    if validation_error:
+        return JSONResponse({"error": validation_error}, status_code=400)
 
-        sample_groups = {}
-        for group, samples in session.groups.items():
-            for s in samples:
-                if s in session.sample_names and s not in session.excluded_samples:
-                    sample_groups.setdefault(group, []).append(
-                        session.sample_names.index(s)
-                    )
+    normalized_model = normalize_model_name(model)
+    model_capability = get_model_capability(normalized_model)
+    if not model_capability["known"]:
+        valid_models = ", ".join(MODEL_SPECS.keys())
+        return JSONResponse(
+            {"error": f"Unknown model: {model}. Choose from: {valid_models}"},
+            status_code=400,
+        )
+    if not model_capability["available"]:
+        return JSONResponse({"error": model_capability["unavailable_reason"]}, status_code=400)
 
-        if len(sample_groups) < 2:
-            return None, f"Only {len(sample_groups)} group(s) have valid samples after exclusion — need ≥ 2"
-
-        for gname, gidx in sample_groups.items():
-            if len(gidx) < 2:
-                return None, f"Group '{gname}' has only {len(gidx)} sample(s) after exclusion — need ≥ 2"
-
-        valid_models = {"rf", "random_forest", "xgboost", "xgb", "lightgbm", "lgbm",
-                        "logistic_regression", "logistic", "lr_l1",
-                        "svm", "svm_linear", "linear_svm"}
-        if model.lower().replace(" ", "_") not in valid_models:
-            return None, (
-                f"Unknown model: {model}. Choose from: rf, xgboost, lightgbm, "
-                "logistic_regression, svm_linear"
-            )
-
-        valid_panels = {"forward", "lasso", "stability", "mrmr"}
-        if panel_method not in valid_panels:
-            return None, (
-                f"Unknown panel method: {panel_method}. "
-                f"Choose from: {', '.join(sorted(valid_panels))}"
-            )
-
-        return sample_groups, None
+    valid_panels = {"forward", "lasso", "stability", "mrmr"}
+    if panel_method not in valid_panels:
+        return JSONResponse(
+            {"error": f"Unknown panel method: {panel_method}. Choose from: {', '.join(sorted(valid_panels))}"},
+            status_code=400,
+        )
 
     async def event_generator():
-        sample_groups, validation_error = validate_request()
-        if validation_error:
-            yield f"event: app_error\ndata: {json.dumps({'detail': validation_error})}\n\n"
-            return
         start_revision = session.analysis_revision
-
-        progress_queue = asyncio.Queue()
+        progress_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         def progress_callback(step, pct, msg):
@@ -95,7 +101,7 @@ async def biomarker_stream(
                 n_top_genes=n_top_genes,
                 n_estimators=n_estimators,
                 cv_folds=cv_folds,
-                model=model,
+                model=normalized_model,
                 panel_method=panel_method,
                 progress_callback=progress_callback,
             ),
@@ -108,7 +114,6 @@ async def biomarker_stream(
             except asyncio.TimeoutError:
                 continue
 
-        # Drain remaining progress messages after future completes
         while not progress_queue.empty():
             try:
                 progress = progress_queue.get_nowait()
@@ -126,10 +131,9 @@ async def biomarker_stream(
                 return
             session.biomarker_results = result
             yield f"event: complete\ndata: {json.dumps(result, default=_json_safe)}\n\n"
-        except Exception as e:
-            import traceback
+        except Exception as exc:
             traceback.print_exc()
-            yield f"event: app_error\ndata: {json.dumps({'detail': str(e)})}\n\n"
+            yield f"event: app_error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -142,7 +146,7 @@ async def deg_analysis(
     log2fc_threshold: float = Query(1.0, ge=0),
     pvalue_threshold: float = Query(0.05, ge=0, le=1),
     use_raw_pvalue: bool = Query(False),
-    reference_group: str = Query(None),
+    reference_group: str | None = Query(None),
 ):
     """Run DEG analysis between groups."""
     session = request.app.state.sessions.get(session_id)
@@ -151,11 +155,28 @@ async def deg_analysis(
     start_revision = session.analysis_revision
 
     if len(session.groups) != 2:
+        return JSONResponse({"error": "DEG requires exactly 2 groups"}, status_code=400)
+
+    sample_groups: dict[str, list[int]] = {}
+    for group, samples in session.groups.items():
+        for sample in samples:
+            if sample in session.sample_names and sample not in session.excluded_samples:
+                sample_groups.setdefault(group, []).append(session.sample_names.index(sample))
+
+    if len(sample_groups) != 2:
+        missing = [group for group in session.groups if group not in sample_groups]
         return JSONResponse(
-            {"error": "DEG requires exactly 2 groups"}, status_code=400
+            {"error": f"Group(s) {missing} have no valid samples after exclusion"},
+            status_code=400,
         )
 
-    # Validate method
+    for group_name, indices in sample_groups.items():
+        if len(indices) < 2:
+            return JSONResponse(
+                {"error": f"Group '{group_name}' has only {len(indices)} sample(s) after exclusion; need at least 2"},
+                status_code=400,
+            )
+
     valid_methods = ("wilcoxon", "ttest")
     if method not in valid_methods:
         return JSONResponse(
@@ -163,33 +184,6 @@ async def deg_analysis(
             status_code=400,
         )
 
-    from mlheatmap.core.deg import compute_deg
-
-    # Build sample indices from groups
-    sample_groups = {}
-    for group, samples in session.groups.items():
-        for s in samples:
-            if s in session.sample_names and s not in session.excluded_samples:
-                sample_groups.setdefault(group, []).append(
-                    session.sample_names.index(s)
-                )
-
-    # Validate both groups survived exclusion and have enough samples
-    if len(sample_groups) != 2:
-        missing = [g for g in session.groups if g not in sample_groups]
-        return JSONResponse(
-            {"error": f"Group(s) {missing} have no valid samples after exclusion"},
-            status_code=400,
-        )
-    for group_name, indices in sample_groups.items():
-        if len(indices) < 2:
-            return JSONResponse(
-                {"error": f"Group '{group_name}' has only {len(indices)} sample(s) after exclusion — need ≥ 2"},
-                status_code=400,
-            )
-
-    # Reorder so that reference_group is second (denominator in log2FC).
-    # Convention: log2FC = log2(comparison) - log2(reference)
     if reference_group:
         if reference_group not in sample_groups:
             valid = ", ".join(sample_groups.keys())
@@ -197,20 +191,20 @@ async def deg_analysis(
                 {"error": f"Unknown reference group '{reference_group}'. Choose one of: {valid}"},
                 status_code=400,
             )
-        comparison = next(g for g in sample_groups if g != reference_group)
+        comparison = next(group for group in sample_groups if group != reference_group)
         sample_groups = {
             comparison: sample_groups[comparison],
             reference_group: sample_groups[reference_group],
         }
 
-    # Use size-factor-normalized counts for log2FC when using DESeq2-VST
-    # (raw counts ignore library-size differences; VST is non-linear)
     sf_counts = None
     if session.norm_method == "deseq2" and session.size_factors is not None:
         df = session.mapped_counts if session.mapped_counts is not None else session.raw_counts
         if df is not None:
             raw = df.values.astype(float)
             sf_counts = raw / session.size_factors[np.newaxis, :]
+
+    from mlheatmap.core.deg import compute_deg
 
     result = compute_deg(
         expression=session.normalized,
@@ -226,41 +220,38 @@ async def deg_analysis(
     if session.analysis_revision != start_revision:
         return _stale_inputs_response()
 
-    # Store for heatmap use
     session.deg_results = result
 
-    # For ≤20,000 genes, send all results for complete volcano plot
-    # For larger datasets, send top by p-value + all significant
     all_results = result["results"]
     if len(all_results) > 20000:
         top_results = all_results[:5000]
-        sig_genes = [r for r in all_results if r["direction"] != "ns"]
-        seen = {r["gene"] for r in top_results}
-        for r in sig_genes:
-            if r["gene"] not in seen:
-                top_results.append(r)
+        significant = [row for row in all_results if row["direction"] != "ns"]
+        seen = {row["gene"] for row in top_results}
+        for row in significant:
+            if row["gene"] not in seen:
+                top_results.append(row)
         all_results = top_results
 
-    response = {
-        "results": all_results,
-        "summary": result["summary"],
-        "group_names": result["group_names"],
-        "comparison_group": result["comparison_group"],
-        "reference_group": result["reference_group"],
-        "thresholds": result["thresholds"],
-        "method": result["method"],
-        "pvalue_type": result.get("pvalue_type", "fdr"),
-    }
-
-    return JSONResponse(response, headers={"Content-Type": "application/json"})
+    return JSONResponse(
+        {
+            "results": all_results,
+            "summary": result["summary"],
+            "group_names": result["group_names"],
+            "comparison_group": result["comparison_group"],
+            "reference_group": result["reference_group"],
+            "thresholds": result["thresholds"],
+            "method": result["method"],
+            "pvalue_type": result.get("pvalue_type", "fdr"),
+        },
+        headers={"Content-Type": "application/json"},
+    )
 
 
 def _json_safe(obj):
     """JSON serializer for numpy types."""
-    import numpy as np
-    if isinstance(obj, (np.integer,)):
+    if isinstance(obj, np.integer):
         return int(obj)
-    if isinstance(obj, (np.floating,)):
+    if isinstance(obj, np.floating):
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()
