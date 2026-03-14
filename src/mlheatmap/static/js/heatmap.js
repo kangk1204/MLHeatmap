@@ -17,6 +17,21 @@ const Heatmap = {
         return div.innerHTML;
     },
 
+    _buildTopLeftTitleAnnotation(text) {
+        return {
+            text: this._escapeHtml(text),
+            xref: 'paper',
+            yref: 'paper',
+            x: 0,
+            y: 1.04,
+            showarrow: false,
+            font: { size: 12, color: '#cbd5e1' },
+            xanchor: 'left',
+            yanchor: 'bottom',
+            align: 'left',
+        };
+    },
+
     cancelPending() {
         const hadPending = this._pendingRequest;
         this._requestToken += 1;
@@ -837,7 +852,7 @@ const Heatmap = {
             plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
+            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 68 : 54, b: 60 },
 
             xaxis: {
                 domain: xHeatmap,
@@ -921,15 +936,7 @@ const Heatmap = {
             });
         }
 
-        // Model + gene count annotation
-        layout.annotations.push({
-            text: `${model || 'ML'} SHAP Top ${nGenes} genes`,
-            xref: 'paper', yref: 'paper',
-            x: 0, y: -0.01,
-            showarrow: false,
-            font: { size: 10, color: '#64748b' },
-            xanchor: 'left', yanchor: 'top',
-        });
+        layout.annotations.push(this._buildTopLeftTitleAnnotation(`${model || 'ML'} SHAP Top ${nGenes} genes`));
 
         Plotly.newPlot('heatmap-plot', traces, layout, {
             responsive: true,
@@ -1135,7 +1142,7 @@ const Heatmap = {
             paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
             font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 10 },
             height: totalHeight, width: sliderWidth > 0 ? sliderWidth : null,
-            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 40 : 25, b: 60 },
+            margin: { l: hasRowDendro ? 20 : leftMargin, r: 80, t: hasGroups ? 68 : 54, b: 60 },
 
             xaxis: { domain: xHeatmap, tickvals: xNums, ticktext: x, tickangle: -45,
                 tickfont: { size: sampleFontSize, color: '#94a3b8' }, side: 'bottom',
@@ -1167,9 +1174,7 @@ const Heatmap = {
                 showarrow: false, font: { size: 11, color: '#cbd5e1' }, xanchor: 'center', yanchor: 'middle' });
         }
 
-        layout.annotations.push({ text: `DEG Top ${nGenes} genes`,
-            xref: 'paper', yref: 'paper', x: 0, y: -0.01,
-            showarrow: false, font: { size: 10, color: '#64748b' }, xanchor: 'left', yanchor: 'top' });
+        layout.annotations.push(this._buildTopLeftTitleAnnotation(`DEG Top ${nGenes} genes`));
 
         Plotly.newPlot('heatmap-plot', traces, layout, {
             responsive: true, displayModeBar: true,

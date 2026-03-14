@@ -48,7 +48,6 @@ mlheatmap = "mlheatmap.cli:main"
 exclude = [
     "/figures/**",
     "/test_data/geo/**",
-    "/src/mlheatmap/data/*.tsv.gz",
 ]
 
 [tool.hatch.build.targets.wheel]
