@@ -5,11 +5,81 @@ const Biomarker = {
     _mlRunToken: 0,
     _degRunToken: 0,
     _pendingDegRequest: false,
+    VOLCANO_NS_RASTER_THRESHOLD: 4000,
 
     _escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str ?? '';
         return div.innerHTML;
+    },
+
+    _hexToRgba(hex, opacity) {
+        const cleaned = (hex || '').replace('#', '');
+        if (cleaned.length !== 6) return `rgba(107,114,128,${opacity})`;
+        const r = parseInt(cleaned.slice(0, 2), 16);
+        const g = parseInt(cleaned.slice(2, 4), 16);
+        const b = parseInt(cleaned.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    },
+
+    _buildVolcanoBackgroundImage(points, {
+        xRange,
+        yRange,
+        color = '#6b7280',
+        opacity = 0.28,
+        size = 4,
+        adaptiveCap = null,
+    }) {
+        if (!points || points.length === 0) return null;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 1400;
+        canvas.height = 1000;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+
+        const [xMin, xMax] = xRange;
+        const [yMin, yMax] = yRange;
+        const pad = 12;
+        const plotWidth = canvas.width - pad * 2;
+        const plotHeight = canvas.height - pad * 2;
+        const fill = this._hexToRgba(color, opacity);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = fill;
+
+        const toCanvasX = (value) => {
+            const ratio = (value - xMin) / Math.max(xMax - xMin, 1e-9);
+            return pad + ratio * plotWidth;
+        };
+        const toCanvasY = (value) => {
+            const ratio = (yMax - value) / Math.max(yMax - yMin, 1e-9);
+            return pad + ratio * plotHeight;
+        };
+
+        points.forEach((point) => {
+            const px = toCanvasX(point.log2fc);
+            const py = toCanvasY(point.display_neg_log10_p);
+            const isCapped = adaptiveCap !== null && point.neg_log10_p > adaptiveCap;
+            const radius = isCapped ? size * 0.8 : size * 0.55;
+
+            if (isCapped) {
+                ctx.beginPath();
+                ctx.moveTo(px, py - radius);
+                ctx.lineTo(px + radius, py);
+                ctx.lineTo(px, py + radius);
+                ctx.lineTo(px - radius, py);
+                ctx.closePath();
+                ctx.fill();
+            } else {
+                ctx.beginPath();
+                ctx.arc(px, py, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        return canvas.toDataURL('image/png');
     },
 
     cancelPending() {
@@ -268,6 +338,20 @@ const Biomarker = {
     showResults(data) {
         document.getElementById('biomarker-results').classList.remove('hidden');
 
+        const warningBox = document.getElementById('biomarker-analysis-warnings');
+        if (warningBox) {
+            const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+            if (warnings.length > 0) {
+                warningBox.innerHTML = warnings
+                    .map(message => `<p>${this._escapeHtml(message)}</p>`)
+                    .join('');
+                warningBox.classList.remove('hidden');
+            } else {
+                warningBox.innerHTML = '';
+                warningBox.classList.add('hidden');
+            }
+        }
+
         // Accuracy badge
         const acc = data.accuracy;
         const badge = document.getElementById('accuracy-badge');
@@ -288,6 +372,13 @@ const Biomarker = {
                 rocTag.textContent = 'CV Re-eval';
                 rocTag.className = 'eval-tag internal';
             }
+        }
+
+        const scopeNote = document.getElementById('panel-method-scope-note');
+        if (scopeNote) {
+            const scope = data.performance_scope || {};
+            scopeNote.textContent = scope.panel_method
+                || 'Compact Panel Selection only changes the optimal compact panel below. SHAP, ROC and CV accuracy reflect the selected ML model.';
         }
 
         // SHAP plot
@@ -662,15 +753,28 @@ const Biomarker = {
             summaryEl.appendChild(wrapper);
         });
 
+        const degNote = document.getElementById('deg-results-note');
+        if (degNote) {
+            const counts = data.result_counts || {};
+            if (data.results_truncated) {
+                degNote.textContent = `Volcano plot uses all ${counts.plot || counts.full} genes. `
+                    + `The table below is limited to ${counts.table || data.results.length} ranked rows for responsiveness.`;
+                degNote.classList.remove('hidden');
+            } else {
+                degNote.textContent = `Volcano plot and table currently use all ${counts.full || data.results.length} genes.`;
+                degNote.classList.remove('hidden');
+            }
+        }
+
         // Volcano plot
         this.plotVolcano(data);
 
         // DEG table
-        this.populateDegTable(data.results, comp);
+        this.populateDegTable(data.table_results || data.results, comp);
     },
 
     plotVolcano(data) {
-        const results = data.results;
+        const results = data.plot_results || data.results;
         const fcThresh = data.thresholds.log2fc;
         const pThresh = data.thresholds.pvalue;
         const negLog10PThresh = -Math.log10(pThresh);
@@ -681,11 +785,6 @@ const Biomarker = {
         const compSafe = this._escapeHtml(comp);
         const refSafe = this._escapeHtml(ref);
         const fcAxisLabel = (compSafe && refSafe) ? `log2FC (${compSafe} / ${refSafe})` : 'log2 Fold Change';
-
-        // Separate by direction
-        const up = results.filter(r => r.direction === 'up');
-        const down = results.filter(r => r.direction === 'down');
-        const ns = results.filter(r => r.direction === 'ns');
 
         // Adaptive Y-cap: prevent extreme -log10(p) values from
         // squashing all points at the top of the plot.
@@ -706,12 +805,22 @@ const Biomarker = {
 
         // Clamp displayed y-values; keep originals in hover
         const clampY = v => Math.min(v, adaptiveCap);
+        const decoratedResults = results.map(r => ({
+            ...r,
+            display_neg_log10_p: clampY(r.neg_log10_p),
+        }));
 
-        const makeTrace = (subset, name, color, size, opacity) => ({
+        // Separate by direction after display coordinates are available
+        const up = decoratedResults.filter(r => r.direction === 'up');
+        const down = decoratedResults.filter(r => r.direction === 'down');
+        const ns = decoratedResults.filter(r => r.direction === 'ns');
+
+        const makeInteractiveTrace = (subset, name, color, size, opacity) => ({
             x: subset.map(r => r.log2fc),
-            y: subset.map(r => clampY(r.neg_log10_p)),
+            y: subset.map(r => r.display_neg_log10_p),
             text: subset.map(r => r.gene),
             customdata: subset.map(r => r.neg_log10_p),
+            type: 'scattergl',
             mode: 'markers',
             name: `${name} (${subset.length})`,
             marker: {
@@ -723,13 +832,53 @@ const Biomarker = {
             hovertemplate: `<b>%{text}</b><br>log2FC: %{x:.3f}<br>-log10(${pLabel}): %{customdata:.2f}<extra></extra>`,
         });
 
+        const makeBackgroundTrace = (subset, name, color, size, opacity) => ({
+            x: subset.map(r => r.log2fc),
+            y: subset.map(r => r.display_neg_log10_p),
+            type: 'scattergl',
+            mode: 'markers',
+            name: `${name} (${subset.length})`,
+            marker: {
+                color,
+                size,
+                opacity,
+                line: { width: 0 },
+            },
+            hoverinfo: 'skip',
+        });
+
         const upName = compSafe ? `Up in ${compSafe}` : 'Up';
         const downName = compSafe ? `Down in ${compSafe}` : 'Down';
-        const traces = [
-            makeTrace(ns, 'NS', '#6b7280', 4, 0.45),
-            makeTrace(up, upName, '#ef4444', 7, 0.85),
-            makeTrace(down, downName, '#3b82f6', 7, 0.85),
-        ];
+        const allFc = decoratedResults.map(r => r.log2fc);
+        const maxFc = Math.max(Math.abs(Math.min(...allFc)), Math.abs(Math.max(...allFc)), fcThresh + 1);
+        const maxNlp = needsCap ? adaptiveCap : Math.max(...allNlpRaw, negLog10PThresh + 1);
+        const yPadding = maxNlp * 0.12;
+        const xRange = [-maxFc * 1.1, maxFc * 1.1];
+        const yRange = [-0.5, maxNlp + yPadding];
+        const shouldRasterizeNs = ns.length >= this.VOLCANO_NS_RASTER_THRESHOLD;
+
+        const traces = [];
+        if (shouldRasterizeNs) {
+            traces.push({
+                x: [null],
+                y: [null],
+                type: 'scatter',
+                mode: 'markers',
+                name: `NS (${ns.length})`,
+                marker: {
+                    color: '#6b7280',
+                    size: 6,
+                    opacity: 0.28,
+                    line: { width: 0 },
+                },
+                hoverinfo: 'skip',
+                showlegend: true,
+            });
+        } else {
+            traces.push(makeBackgroundTrace(ns, 'NS', '#6b7280', 4, 0.28));
+        }
+        traces.push(makeInteractiveTrace(up, upName, '#ef4444', 7, 0.85));
+        traces.push(makeInteractiveTrace(down, downName, '#3b82f6', 7, 0.85));
 
         // Top gene labels
         const sigGenes = [...up, ...down].sort((a, b) => {
@@ -740,7 +889,7 @@ const Biomarker = {
         if (sigGenes.length > 0) {
             traces.push({
                 x: sigGenes.map(r => r.log2fc),
-                y: sigGenes.map(r => clampY(r.neg_log10_p)),
+                y: sigGenes.map(r => r.display_neg_log10_p),
                 text: sigGenes.map(r => r.gene),
                 mode: 'text',
                 textposition: 'top center',
@@ -750,14 +899,6 @@ const Biomarker = {
             });
         }
 
-        // Compute x range
-        const allFc = results.map(r => r.log2fc);
-        const maxFc = Math.max(Math.abs(Math.min(...allFc)), Math.abs(Math.max(...allFc)), fcThresh + 1);
-
-        // Compute y range with padding for top gene labels
-        const maxNlp = needsCap ? adaptiveCap : Math.max(...allNlpRaw, negLog10PThresh + 1);
-        const yPadding = maxNlp * 0.12;  // 12% padding for text labels
-
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(0,0,0,0)',
@@ -766,16 +907,17 @@ const Biomarker = {
                 title: { text: fcAxisLabel, font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
-                range: [-maxFc * 1.1, maxFc * 1.1],
+                range: xRange,
             },
             yaxis: {
                 title: { text: `-log10(${pLabel})`, font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
-                range: [-0.5, maxNlp + yPadding],
+                range: yRange,
             },
             legend: { x: 0.02, y: 0.98, bgcolor: 'rgba(0,0,0,0.3)', font: { size: 10 } },
             margin: { l: 60, r: 20, t: 10, b: 60 },
+            images: [],
             shapes: [
                 // Vertical FC thresholds
                 { type: 'line', x0: fcThresh, x1: fcThresh, y0: 0, y1: 1, yref: 'paper', line: { color: 'rgba(255,255,255,0.15)', dash: 'dash', width: 1 } },
@@ -796,6 +938,31 @@ const Biomarker = {
             }] : [],
         };
 
+        if (shouldRasterizeNs) {
+            const nsImage = this._buildVolcanoBackgroundImage(ns, {
+                xRange,
+                yRange,
+                color: '#6b7280',
+                opacity: 0.28,
+                size: 4,
+                adaptiveCap,
+            });
+            if (nsImage) {
+                layout.images.push({
+                    source: nsImage,
+                    xref: 'x',
+                    yref: 'y',
+                    x: xRange[0],
+                    y: yRange[1],
+                    sizex: xRange[1] - xRange[0],
+                    sizey: yRange[1] - yRange[0],
+                    sizing: 'stretch',
+                    opacity: 1,
+                    layer: 'below',
+                });
+            }
+        }
+
         Plotly.newPlot('volcano-plot', traces, layout, {
             responsive: true, displayModeBar: false,
         });
@@ -806,7 +973,7 @@ const Biomarker = {
         tbody.innerHTML = '';
 
         // Show top 50 significant genes
-        const sig = results.filter(r => r.direction !== 'ns').slice(0, 50);
+        let sig = results.filter(r => r.direction !== 'ns').slice(0, 50);
         if (sig.length === 0) {
             // Fallback: show top 50 by p-value
             sig.push(...results.slice(0, 50));
