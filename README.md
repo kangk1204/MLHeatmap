@@ -12,9 +12,10 @@ Interactive RNA-seq heatmap and biomarker discovery tool.
 ## Native Install (Core)
 
 Native install is the recommended path when you want the most stable cross-platform setup.
+From a local clone of this repository, install from the repo root:
 
 ```bash
-pip install mlheatmap
+pip install .
 mlheatmap
 ```
 
@@ -96,7 +97,8 @@ Native core install includes:
 - Linear SVM
 - SHAP analysis
 - Excel export
-- Browser-side PNG/SVG export
+- Browser-side PNG/SVG export for interactive plots
+- Server-rendered export/viewing for large heatmaps
 
 ## Docker Install (Full Model Set)
 
@@ -119,11 +121,11 @@ Docker/full install adds:
 If your local environment already supports the optional ML wheels, you can install the full dependency set natively:
 
 ```bash
-pip install "mlheatmap[full]"
+pip install ".[full]"
 ```
 
 ## Notes
 
 - Gene mapping tables for human and mouse are packaged with the app.
-- Image exports are generated in the browser to avoid Kaleido/Chrome runtime issues.
-- Large heatmaps can still use server-side rendering for reliable export and viewing.
+- Interactive plot exports are generated in the browser to avoid Kaleido/Chrome runtime issues.
+- Large heatmaps can switch to server-side rendering for reliable viewing and export.
