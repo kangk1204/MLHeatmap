@@ -51,6 +51,13 @@ async def map_genes(request: Request, body: MappingRequest):
 
     # Invalidate downstream state — row space has changed
     session.invalidate_normalization()
+    session.metadata["mapping"] = {
+        "species": body.species,
+        "id_type": body.id_type,
+        "mapped_count": len(mapping),
+        "unmapped_count": len(unmapped),
+        "total": len(gene_ids),
+    }
 
     return {
         "mapped_count": len(mapping),

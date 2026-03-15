@@ -15,6 +15,8 @@ class Session:
     raw_counts: Optional[pd.DataFrame] = None
     mapped_counts: Optional[pd.DataFrame] = None
     normalized: Optional[np.ndarray] = None
+    deg_abundance: Optional[np.ndarray] = None
+    deg_effect_size_basis: str = ""
     norm_method: str = ""
     size_factors: Optional[np.ndarray] = None
     gene_names: list = field(default_factory=list)
@@ -27,6 +29,7 @@ class Session:
     deg_results: Optional[dict] = None
     heatmap_data: Optional[dict] = None
     heatmap_color_scale: str = "RdBu_r"
+    metadata: dict[str, Any] = field(default_factory=dict)
     analysis_revision: int = 0
     created_at: float = field(default_factory=time.time)
 
@@ -36,16 +39,23 @@ class Session:
         self.biomarker_results = None
         self.deg_results = None
         self.heatmap_data = None
+        self.metadata.pop("biomarker", None)
+        self.metadata.pop("deg", None)
 
     def invalidate_normalization(self) -> None:
         """Drop normalized data and all downstream artifacts."""
         self.analysis_revision += 1
         self.normalized = None
+        self.deg_abundance = None
+        self.deg_effect_size_basis = ""
         self.norm_method = ""
         self.size_factors = None
         self.biomarker_results = None
         self.deg_results = None
         self.heatmap_data = None
+        self.metadata.pop("normalization", None)
+        self.metadata.pop("biomarker", None)
+        self.metadata.pop("deg", None)
 
 
 class SessionStore:

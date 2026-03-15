@@ -1,24 +1,14 @@
-"""Biomarker discovery using ML + SHAP with proper nested CV.
+"""Biomarker discovery using ML + SHAP with nested outer CV."""
 
-Supported models:
-  - Random Forest (default)
-  - XGBoost
-  - LightGBM
-  - Logistic Regression (L1 / Elastic Net)
-  - SVM (linear kernel)
-"""
+from __future__ import annotations
 
 import numpy as np
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import auc, roc_curve
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
 
 from mlheatmap.core.capabilities import normalize_model_name
 
-
-# ──────────────────────────────────────────────────────────
-# Model factory
-# ──────────────────────────────────────────────────────────
 
 def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100):
     """Return (clf, use_shap_tree, needs_scaling) for the requested model."""
@@ -26,7 +16,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name in ("rf", "random_forest"):
         from sklearn.ensemble import RandomForestClassifier
-        # Constrain tree depth for very small samples to reduce overfitting
+
         max_d = 3 if n_samples < 20 else (6 if n_samples < 50 else None)
         clf = RandomForestClassifier(
             n_estimators=n_estimators,
@@ -46,7 +36,6 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
                 "XGBoost is not available in this installation. "
                 "Install mlheatmap[full] or use Docker for the full model set."
             ) from exc
-        # Aggressively constrain for small sample sizes
         if n_samples < 20:
             n_est = min(n_estimators, 50)
             max_d, lr = 2, 0.1
@@ -84,7 +73,6 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
                 "LightGBM is not available in this installation. "
                 "Install mlheatmap[full] or use Docker for the full model set."
             ) from exc
-        # Aggressively constrain for small sample sizes to prevent overfitting
         if n_samples < 20:
             n_est = min(n_estimators, 50)
             n_leaves = 4
@@ -126,6 +114,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name == "logistic_regression":
         from sklearn.linear_model import LogisticRegression
+
         clf = LogisticRegression(
             penalty="l1",
             C=1.0,
@@ -139,6 +128,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
 
     if model_name == "svm_linear":
         from sklearn.svm import SVC
+
         clf = SVC(
             kernel="linear",
             C=1.0,
@@ -148,8 +138,10 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
         )
         return clf, False, True
 
-    raise ValueError(f"Unknown model: {model_name}. "
-                     f"Choose from: rf, xgboost, lightgbm, logistic_regression, svm_linear")
+    raise ValueError(
+        f"Unknown model: {model_name}. "
+        "Choose from: rf, xgboost, lightgbm, logistic_regression, svm_linear"
+    )
 
 
 def _model_display_name(model_name: str) -> str:
@@ -165,9 +157,536 @@ def _model_display_name(model_name: str) -> str:
     return names.get(model_name, model_name)
 
 
-# ──────────────────────────────────────────────────────────
-# Main analysis pipeline
-# ──────────────────────────────────────────────────────────
+def _feature_importance_vector(clf) -> np.ndarray:
+    if hasattr(clf, "feature_importances_"):
+        return np.asarray(clf.feature_importances_, dtype=np.float64)
+    if hasattr(clf, "coef_"):
+        coef = np.abs(np.asarray(clf.coef_, dtype=np.float64))
+        return np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
+    return np.ones(getattr(clf, "n_features_in_", 1), dtype=np.float64)
+
+
+def _predict_proba_full(clf, X: np.ndarray, n_classes: int) -> np.ndarray:
+    raw = np.asarray(clf.predict_proba(X), dtype=np.float64)
+    if raw.ndim == 1:
+        raw = raw.reshape(-1, 1)
+    full = np.zeros((raw.shape[0], n_classes), dtype=np.float64)
+    clf_classes = np.asarray(getattr(clf, "classes_", np.arange(raw.shape[1])), dtype=int)
+    for col_idx, class_idx in enumerate(clf_classes):
+        if 0 <= int(class_idx) < n_classes:
+            full[:, int(class_idx)] = raw[:, col_idx]
+    return full
+
+
+def _mean_multiclass_auc(y_true: np.ndarray, y_prob: np.ndarray, n_classes: int) -> float:
+    y_bin = label_binarize(y_true, classes=range(n_classes))
+    if n_classes == 2:
+        y_bin = np.column_stack([1 - y_bin.ravel(), y_bin.ravel()])
+
+    aucs = []
+    for class_idx in range(n_classes):
+        target = y_bin[:, class_idx]
+        if target.min() == target.max():
+            continue
+        try:
+            fpr, tpr, _ = roc_curve(target, y_prob[:, class_idx])
+        except ValueError:
+            continue
+        aucs.append(auc(fpr, tpr))
+    return float(np.mean(aucs)) if aucs else 0.5
+
+
+def _compute_test_auc(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    *,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    n_classes: int,
+) -> float:
+    clf, _, _ = _build_model(model, n_estimators, len(y_train))
+    if needs_scaling:
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+    clf.fit(X_train, y_train)
+    y_prob = _predict_proba_full(clf, X_test, n_classes)
+    return _mean_multiclass_auc(y_test, y_prob, n_classes)
+
+
+def _evaluate_prefix_auc_curve(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    y_test: np.ndarray,
+    ordered_idx: list[int],
+    gene_names: list[str],
+    *,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    n_classes: int,
+) -> list[dict[str, float | int | str]]:
+    curve = []
+    for k in range(1, len(ordered_idx) + 1):
+        subset = ordered_idx[:k]
+        try:
+            score = _compute_test_auc(
+                X_train[:, subset],
+                y_train,
+                X_test[:, subset],
+                y_test,
+                model=model,
+                n_estimators=n_estimators,
+                needs_scaling=needs_scaling,
+                n_classes=n_classes,
+            )
+        except Exception:
+            score = 0.5
+        curve.append(
+            {
+                "n_genes": k,
+                "auc": float(score),
+                "gene_added": gene_names[ordered_idx[k - 1]],
+            }
+        )
+    return curve
+
+
+def _quick_cv_auc(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_classes: int,
+    *,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    cv,
+) -> float:
+    if cv is None:
+        return 0.5
+    aucs = []
+    quick_n = min(100, n_estimators)
+    for train_idx, test_idx in cv.split(X, y):
+        try:
+            score = _compute_test_auc(
+                X[train_idx],
+                y[train_idx],
+                X[test_idx],
+                y[test_idx],
+                model=model,
+                n_estimators=quick_n,
+                needs_scaling=needs_scaling,
+                n_classes=n_classes,
+            )
+        except Exception:
+            continue
+        aucs.append(score)
+    return float(np.mean(aucs)) if aucs else 0.5
+
+
+def _make_inner_cv(y: np.ndarray, n_splits: int):
+    min_class = int(min(np.bincount(y)))
+    if min_class < 2:
+        return None
+    inner_splits = min(n_splits, min_class)
+    if inner_splits < 2:
+        return None
+    return StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=123)
+
+
+def _build_inner_auc_curve(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    ordered_idx: list[int],
+    gene_names: list[str],
+    *,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    n_splits: int,
+) -> tuple[list[dict[str, float | int | str]], int]:
+    n_classes = len(np.unique(y))
+    inner_cv = _make_inner_cv(y, n_splits)
+
+    auc_curve = []
+    best_auc = -1.0
+    best_n = 0
+    for k in range(1, len(ordered_idx) + 1):
+        subset = ordered_idx[:k]
+        try:
+            mean_auc = _quick_cv_auc(
+                X_all[:, subset],
+                y,
+                n_classes,
+                model=model,
+                n_estimators=n_estimators,
+                needs_scaling=needs_scaling,
+                cv=inner_cv,
+            )
+        except Exception:
+            mean_auc = 0.5
+        auc_curve.append(
+            {
+                "n_genes": k,
+                "auc": float(mean_auc),
+                "gene_added": gene_names[ordered_idx[k - 1]],
+            }
+        )
+        if mean_auc > best_auc:
+            best_auc = mean_auc
+            best_n = k
+    return auc_curve, best_n
+
+
+def _forward_order(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    candidate_idx: list[int],
+    *,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    n_splits: int,
+    max_genes: int,
+) -> list[int]:
+    n_classes = len(np.unique(y))
+    inner_cv = _make_inner_cv(y, n_splits)
+    if inner_cv is None:
+        return list(candidate_idx[:max_genes])
+
+    ordered = []
+    pool = list(candidate_idx[:max_genes])
+    for _ in range(min(max_genes, len(pool))):
+        best_gene = None
+        best_auc = -1.0
+        for gene_idx in pool:
+            if gene_idx in ordered:
+                continue
+            trial = ordered + [gene_idx]
+            try:
+                score = _quick_cv_auc(
+                    X_all[:, trial],
+                    y,
+                    n_classes,
+                    model=model,
+                    n_estimators=n_estimators,
+                    needs_scaling=needs_scaling,
+                    cv=inner_cv,
+                )
+            except Exception:
+                continue
+            if score > best_auc:
+                best_auc = score
+                best_gene = gene_idx
+        if best_gene is None:
+            break
+        ordered.append(best_gene)
+    return ordered
+
+
+def _lasso_order(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    candidate_idx: list[int],
+    *,
+    max_genes: int,
+) -> list[int]:
+    from sklearn.linear_model import LogisticRegression
+
+    X_cand = X_all[:, candidate_idx]
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_cand)
+    n_classes = len(np.unique(y))
+    multi = "ovr" if n_classes > 2 else "auto"
+
+    best_sel: list[int] = []
+    best_coef = np.zeros(len(candidate_idx), dtype=np.float64)
+    for c_val in np.logspace(-3, 1, 20):
+        try:
+            lr = LogisticRegression(
+                penalty="l1",
+                C=c_val,
+                solver="saga",
+                max_iter=5000,
+                multi_class=multi,
+                class_weight="balanced",
+                random_state=42,
+            )
+            lr.fit(X_scaled, y)
+        except Exception:
+            continue
+        coef = np.abs(np.asarray(lr.coef_, dtype=np.float64))
+        coef = np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
+        nonzero = np.where(coef > 1e-10)[0]
+        if 1 <= len(nonzero) <= max_genes and len(nonzero) > len(best_sel):
+            best_sel = nonzero.tolist()
+            best_coef = coef
+
+    if best_sel:
+        ranked = sorted(best_sel, key=lambda idx: best_coef[idx], reverse=True)
+        return [candidate_idx[idx] for idx in ranked]
+
+    try:
+        lr = LogisticRegression(
+            penalty="l1",
+            C=1.0,
+            solver="saga",
+            max_iter=5000,
+            multi_class=multi,
+            class_weight="balanced",
+            random_state=42,
+        )
+        lr.fit(X_scaled, y)
+        coef = np.abs(np.asarray(lr.coef_, dtype=np.float64))
+        coef = np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
+        ranked = np.argsort(coef)[::-1][:max_genes]
+        return [candidate_idx[idx] for idx in ranked]
+    except Exception:
+        return list(candidate_idx[:max_genes])
+
+
+def _stability_order(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    candidate_idx: list[int],
+    *,
+    max_genes: int,
+) -> list[int]:
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import StratifiedShuffleSplit
+
+    X_cand = X_all[:, candidate_idx]
+    freq = np.zeros(len(candidate_idx), dtype=np.float64)
+    n_classes = len(np.unique(y))
+    multi = "ovr" if n_classes > 2 else "auto"
+    splitter = StratifiedShuffleSplit(n_splits=100, test_size=0.2, random_state=42)
+
+    for seed, (train_idx, _) in enumerate(splitter.split(X_cand, y)):
+        X_sub = X_cand[train_idx]
+        y_sub = y[train_idx]
+        scaler = StandardScaler()
+        X_sub = scaler.fit_transform(X_sub)
+        try:
+            lr = LogisticRegression(
+                penalty="l1",
+                C=0.5,
+                solver="saga",
+                max_iter=2000,
+                multi_class=multi,
+                class_weight="balanced",
+                random_state=seed,
+            )
+            lr.fit(X_sub, y_sub)
+        except Exception:
+            continue
+        coef = np.abs(np.asarray(lr.coef_, dtype=np.float64))
+        coef = np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
+        freq[coef > 1e-10] += 1
+
+    freq /= 100.0
+    threshold = 0.7
+    while threshold >= 0.3:
+        if np.sum(freq >= threshold) >= 2:
+            break
+        threshold -= 0.1
+    if np.sum(freq >= threshold) < 2:
+        ranked = np.argsort(freq)[::-1][:max_genes]
+    else:
+        stable_idx = np.where(freq >= threshold)[0]
+        ranked = sorted(stable_idx, key=lambda idx: freq[idx], reverse=True)[:max_genes]
+    return [candidate_idx[idx] for idx in ranked]
+
+
+def _mrmr_order(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    candidate_idx: list[int],
+    *,
+    max_genes: int,
+) -> list[int]:
+    from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+
+    X_cand = X_all[:, candidate_idx]
+    n_cand = X_cand.shape[1]
+    relevance = mutual_info_classif(X_cand, y, random_state=42)
+    selected_local: list[int] = []
+    remaining = set(range(n_cand))
+
+    for _ in range(min(max_genes, n_cand)):
+        if not remaining:
+            break
+        if not selected_local:
+            best_idx = max(remaining, key=lambda idx: relevance[idx])
+        else:
+            best_idx = None
+            best_score = -np.inf
+            for cand in remaining:
+                redundancy = 0.0
+                for sel in selected_local:
+                    redundancy += mutual_info_regression(
+                        X_cand[:, sel].reshape(-1, 1),
+                        X_cand[:, cand],
+                        random_state=42,
+                    )[0]
+                redundancy /= len(selected_local)
+                score = relevance[cand] - redundancy
+                if score > best_score:
+                    best_score = score
+                    best_idx = cand
+            if best_idx is None:
+                break
+        selected_local.append(best_idx)
+        remaining.discard(best_idx)
+
+    return [candidate_idx[idx] for idx in selected_local]
+
+
+def _panel_selection_order(
+    X_all: np.ndarray,
+    y: np.ndarray,
+    candidate_idx: list[int],
+    gene_names: list[str],
+    *,
+    panel_method: str,
+    model: str,
+    n_estimators: int,
+    needs_scaling: bool,
+    n_splits: int,
+    max_genes: int,
+) -> dict[str, object]:
+    if panel_method == "lasso":
+        ordered_idx = _lasso_order(X_all, y, candidate_idx, max_genes=max_genes)
+        method = "lasso"
+    elif panel_method == "stability":
+        ordered_idx = _stability_order(X_all, y, candidate_idx, max_genes=max_genes)
+        method = "stability"
+    elif panel_method == "mrmr":
+        ordered_idx = _mrmr_order(X_all, y, candidate_idx, max_genes=max_genes)
+        method = "mrmr"
+    else:
+        ordered_idx = _forward_order(
+            X_all,
+            y,
+            candidate_idx,
+            model=model,
+            n_estimators=n_estimators,
+            needs_scaling=needs_scaling,
+            n_splits=n_splits,
+            max_genes=max_genes,
+        )
+        method = "forward"
+
+    inner_auc_curve, best_n = _build_inner_auc_curve(
+        X_all,
+        y,
+        ordered_idx,
+        gene_names,
+        model=model,
+        n_estimators=n_estimators,
+        needs_scaling=needs_scaling,
+        n_splits=n_splits,
+    )
+    return {
+        "ordered_idx": ordered_idx,
+        "inner_auc_curve": inner_auc_curve,
+        "best_n": best_n,
+        "method": method,
+    }
+
+
+def _aggregate_panel_summary(
+    panel_orders: list[dict[str, object]],
+    selection_curves: list[list[dict[str, float | int | str]]],
+    heldout_curves: list[list[dict[str, float | int | str]]],
+    gene_names: list[str],
+    *,
+    method: str,
+) -> dict[str, object] | None:
+    if not panel_orders:
+        return None
+
+    max_k = max(len(curve) for curve in heldout_curves)
+    heldout_by_k = {k: [] for k in range(1, max_k + 1)}
+    inner_by_k = {k: [] for k in range(1, max_k + 1)}
+    gene_added_by_k: dict[int, list[str]] = {k: [] for k in range(1, max_k + 1)}
+
+    for curve in heldout_curves:
+        for point in curve:
+            k = int(point["n_genes"])
+            heldout_by_k[k].append(float(point["auc"]))
+            gene_added_by_k[k].append(str(point["gene_added"]))
+    for curve in selection_curves:
+        for point in curve:
+            inner_by_k[int(point["n_genes"])].append(float(point["auc"]))
+
+    inner_curve_summary = []
+    best_n = 1
+    best_inner_auc = -1.0
+    for k in range(1, max_k + 1):
+        if not heldout_by_k[k]:
+            continue
+        mean_inner = float(np.mean(inner_by_k[k])) if inner_by_k[k] else 0.5
+        mean_heldout = float(np.mean(heldout_by_k[k]))
+        heldout_std = float(np.std(heldout_by_k[k]))
+        gene_name = max(set(gene_added_by_k[k]), key=gene_added_by_k[k].count)
+        inner_curve_summary.append(
+            {
+                "n_genes": k,
+                "auc": mean_heldout,
+                "std": heldout_std,
+                "selection_auc": mean_inner,
+                "selection_std": float(np.std(inner_by_k[k])) if inner_by_k[k] else 0.0,
+                "gene_added": gene_name,
+            }
+        )
+        if mean_inner > best_inner_auc:
+            best_inner_auc = mean_inner
+            best_n = k
+
+    selected_gene_stats: dict[str, dict[str, float]] = {}
+    for panel in panel_orders:
+        ordered_idx = list(panel["ordered_idx"])
+        for rank, gene_idx in enumerate(ordered_idx[:best_n], start=1):
+            gene_name = gene_names[gene_idx]
+            stats = selected_gene_stats.setdefault(gene_name, {"count": 0.0, "rank_sum": 0.0})
+            stats["count"] += 1.0
+            stats["rank_sum"] += float(rank)
+
+    ranked_consensus = sorted(
+        selected_gene_stats.items(),
+        key=lambda item: (
+            -item[1]["count"] / len(panel_orders),
+            item[1]["rank_sum"] / item[1]["count"],
+            item[0],
+        ),
+    )
+    best_genes = [gene for gene, _ in ranked_consensus[:best_n]]
+    selection_frequency = [
+        {
+            "gene": gene,
+            "frequency": round(stats["count"] / len(panel_orders), 4),
+            "mean_rank": round(stats["rank_sum"] / stats["count"], 4),
+        }
+        for gene, stats in ranked_consensus
+    ]
+
+    heldout_best = heldout_by_k.get(best_n, [])
+    return {
+        "best_genes": best_genes,
+        "best_auc": round(float(np.mean(heldout_best)) if heldout_best else 0.5, 4),
+        "auc_std": round(float(np.std(heldout_best)) if heldout_best else 0.0, 4),
+        "n_genes": best_n,
+        "auc_curve": inner_curve_summary,
+        "method": method,
+        "auc_note": "nested_outer_cv",
+        "evaluation": "nested_outer_cv",
+        "selection_frequency": selection_frequency,
+    }
+
 
 def run_biomarker_analysis(
     expression: np.ndarray,
@@ -180,135 +699,119 @@ def run_biomarker_analysis(
     panel_method: str = "forward",
     progress_callback=None,
 ) -> dict:
-    """Full biomarker discovery pipeline with proper nested CV.
+    """Full biomarker discovery pipeline with reviewer-safe nested CV."""
 
-    Fixes data leakage: feature selection and SHAP are done per fold.
-    Supports multiple ML models via the `model` parameter.
-    """
     def _progress(step, pct, msg):
         if progress_callback:
             progress_callback(step, pct, msg)
 
     model_display = _model_display_name(model)
-
-    # 1. Prepare data
     sample_indices = []
     labels = []
     group_names = sorted(sample_groups.keys())
     for group in group_names:
-        indices = sample_groups[group]
-        sample_indices.extend(indices)
-        labels.extend([group] * len(indices))
+        sample_indices.extend(sample_groups[group])
+        labels.extend([group] * len(sample_groups[group]))
 
-    X_all = expression[:, sample_indices].T  # (samples x genes)
+    X_all = expression[:, sample_indices].T
+    all_gene_names = list(gene_names)
     le = LabelEncoder()
     y = le.fit_transform(labels)
-    all_gene_names = list(gene_names)
+    n_all_genes = X_all.shape[1]
+    prefilter_n = min(2000, n_all_genes)
+    max_panel_genes = min(n_top_genes, 15)
 
     _progress("preprocessing", 5, f"Data prepared — using {model_display}")
 
-    # 2. Variance prefilter is performed per fold (training data only)
-    #    to prevent any test-fold information influencing the feature space.
-    prefilter_n = min(2000, X_all.shape[1])
-    n_all_genes = X_all.shape[1]
-
-    _progress("training", 10, f"Preparing nested CV (prefilter top {prefilter_n} per fold)")
-
-    # 3. Build model
     _, use_shap_tree, needs_scaling = _build_model(model, n_estimators, len(y))
-
-    # 4. Nested CV: outer folds for unbiased evaluation
     min_class_count = int(min(np.bincount(y)))
     n_splits = max(2, min(cv_folds, min_class_count))
     outer_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    # Accumulators (on FULL gene space — fold results mapped back)
-    fold_importances = np.zeros(n_all_genes)
-    fold_shap_abs_sum = np.zeros(n_all_genes)
-    fold_shap_count = 0
-    fold_accuracies = []
-    sample_shap_abs = np.zeros((len(y), n_all_genes))
+    warnings = []
+    if n_splits < cv_folds:
+        warnings.append(
+            f"Requested {cv_folds} CV folds, but the smallest class has only {min_class_count} sample(s). "
+            f"Using {n_splits} folds instead."
+        )
 
-    # ── Out-of-fold ROC accumulators (truly unbiased) ──
+    fold_importances = np.zeros(n_all_genes, dtype=np.float64)
+    fold_shap_abs_sum = np.zeros(n_all_genes, dtype=np.float64)
+    fold_shap_count = 0
+    fold_accuracies: list[float] = []
+    sample_shap_abs = np.zeros((len(y), n_all_genes), dtype=np.float64)
+
     n_classes = len(le.classes_)
     y_bin_all = label_binarize(y, classes=range(n_classes))
     if n_classes == 2:
         y_bin_all = np.column_stack([1 - y_bin_all.ravel(), y_bin_all.ravel()])
     roc_mean_fpr = np.linspace(0, 1, 100)
-    fold_roc_tprs: dict[int, list] = {i: [] for i in range(n_classes)}
-    fold_roc_aucs: dict[int, list] = {i: [] for i in range(n_classes)}
+    fold_roc_tprs: dict[int, list[np.ndarray]] = {i: [] for i in range(n_classes)}
+    fold_roc_aucs: dict[int, list[float]] = {i: [] for i in range(n_classes)}
+
+    panel_orders: list[dict[str, object]] = []
+    selection_curves: list[list[dict[str, float | int | str]]] = []
+    heldout_curves: list[list[dict[str, float | int | str]]] = []
 
     _progress("training", 15, f"Starting nested CV ({n_splits} folds) with {model_display}")
 
     for fold_i, (train_idx, test_idx) in enumerate(outer_cv.split(X_all, y)):
-        pct = 15 + int(fold_i / n_splits * 55)
-        _progress("training", pct, f"CV fold {fold_i+1}/{n_splits}")
+        pct = 15 + int(fold_i / n_splits * 50)
+        _progress("training", pct, f"CV fold {fold_i + 1}/{n_splits}")
 
-        y_train, y_test = y[train_idx], y[test_idx]
+        X_train_all = X_all[train_idx]
+        X_test_all = X_all[test_idx]
+        y_train = y[train_idx]
+        y_test = y[test_idx]
 
-        # Per-fold variance filter (training data only — no test leakage)
-        train_var = np.var(X_all[train_idx], axis=0)
-        train_var = np.nan_to_num(train_var, nan=0.0)
+        train_var = np.nan_to_num(np.var(X_train_all, axis=0), nan=0.0)
         fold_var_idx = np.argsort(train_var)[-prefilter_n:]
+        X_train = X_train_all[:, fold_var_idx]
+        X_test = X_test_all[:, fold_var_idx]
 
-        X_train = X_all[train_idx][:, fold_var_idx]
-        X_test = X_all[test_idx][:, fold_var_idx]
-
-        # Build fresh model for this fold
         clf, _, _ = _build_model(model, n_estimators, len(y_train))
-
-        # Scale if needed (linear models)
-        scaler = None
         if needs_scaling:
             scaler = StandardScaler()
             X_train = scaler.fit_transform(X_train)
             X_test = scaler.transform(X_test)
-
         clf.fit(X_train, y_train)
 
-        # Feature importances (captured per-fold for nested top-N evaluation)
-        if hasattr(clf, 'feature_importances_'):
-            this_fi = clf.feature_importances_
-        elif hasattr(clf, 'coef_'):
-            coef = np.abs(clf.coef_)
-            this_fi = np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
-        else:
-            this_fi = np.ones(len(fold_var_idx)) / len(fold_var_idx)
+        this_fi = _feature_importance_vector(clf)
         fold_importances[fold_var_idx] += this_fi
-
-        # Accuracy
         fold_accuracies.append(float(np.mean(clf.predict(X_test) == y_test)))
 
-        # ── Per-fold top-N evaluation for unbiased ROC ──
-        # Gene selection uses only training-fold importance → no test leakage
-        fold_topn_idx = np.argsort(this_fi)[-n_top_genes:]
+        fold_topn_local = np.argsort(this_fi)[-n_top_genes:]
         try:
             clf_topn, _, _ = _build_model(model, min(100, n_estimators), len(y_train))
-            X_tr_topn = X_all[train_idx][:, fold_var_idx[fold_topn_idx]]
-            X_te_topn = X_all[test_idx][:, fold_var_idx[fold_topn_idx]]
+            X_tr_topn = X_train_all[:, fold_var_idx[fold_topn_local]]
+            X_te_topn = X_test_all[:, fold_var_idx[fold_topn_local]]
             if needs_scaling:
                 sc_topn = StandardScaler()
                 X_tr_topn = sc_topn.fit_transform(X_tr_topn)
                 X_te_topn = sc_topn.transform(X_te_topn)
             clf_topn.fit(X_tr_topn, y_train)
-            y_prob_topn = clf_topn.predict_proba(X_te_topn)
+            y_prob_topn = _predict_proba_full(clf_topn, X_te_topn, n_classes)
             y_test_bin = y_bin_all[test_idx]
-            for ci in range(n_classes):
-                if ci < y_prob_topn.shape[1]:
-                    fpr_f, tpr_f, _ = roc_curve(y_test_bin[:, ci], y_prob_topn[:, ci])
-                    fold_roc_tprs[ci].append(np.interp(roc_mean_fpr, fpr_f, tpr_f))
-                    fold_roc_tprs[ci][-1][0] = 0.0
-                    fold_roc_aucs[ci].append(auc(fpr_f, tpr_f))
+            for class_idx in range(n_classes):
+                target = y_test_bin[:, class_idx]
+                if target.min() == target.max():
+                    continue
+                try:
+                    fpr_f, tpr_f, _ = roc_curve(target, y_prob_topn[:, class_idx])
+                except ValueError:
+                    continue
+                fold_roc_tprs[class_idx].append(np.interp(roc_mean_fpr, fpr_f, tpr_f))
+                fold_roc_tprs[class_idx][-1][0] = 0.0
+                fold_roc_aucs[class_idx].append(auc(fpr_f, tpr_f))
         except Exception:
-            pass  # If top-N model fails for this fold, skip
+            pass
 
-        # SHAP on held-out test fold (no data leakage)
         try:
             import shap
+
             if use_shap_tree:
                 explainer = shap.TreeExplainer(clf)
             else:
-                # Use LinearExplainer for linear models when possible, else KernelExplainer
                 try:
                     explainer = shap.LinearExplainer(clf, X_train)
                 except Exception:
@@ -317,112 +820,122 @@ def run_biomarker_analysis(
                     explainer = shap.KernelExplainer(clf.predict_proba, X_train[bg_idx])
 
             shap_values_fold = explainer.shap_values(X_test)
-
-            # Aggregate SHAP — handle all possible output shapes
             if isinstance(shap_values_fold, list):
-                # list of arrays, one per class
                 shap_abs_fold = np.mean([np.abs(sv) for sv in shap_values_fold], axis=0)
             elif isinstance(shap_values_fold, np.ndarray) and shap_values_fold.ndim == 3:
-                # (n_samples, n_features, n_classes)
                 shap_abs_fold = np.mean(np.abs(shap_values_fold), axis=2)
             else:
                 shap_abs_fold = np.abs(shap_values_fold)
-
-            # Ensure correct shape
             if shap_abs_fold.ndim == 1:
                 shap_abs_fold = shap_abs_fold.reshape(1, -1)
-
             fold_shap_abs_sum[fold_var_idx] += np.sum(shap_abs_fold, axis=0)
             fold_shap_count += shap_abs_fold.shape[0]
             sample_shap_abs[np.ix_(test_idx, fold_var_idx)] = shap_abs_fold
-        except Exception as e:
-            # If SHAP fails, use feature importances as fallback
-            _progress("training", pct, f"SHAP fallback fold {fold_i+1} ({e})")
-            if hasattr(clf, 'feature_importances_'):
-                fi = clf.feature_importances_
-            elif hasattr(clf, 'coef_'):
-                fi = np.mean(np.abs(clf.coef_), axis=0) if clf.coef_.ndim > 1 else np.abs(clf.coef_).ravel()
-            else:
-                fi = np.ones(len(fold_var_idx)) / len(fold_var_idx)
-            for ti in test_idx:
-                sample_shap_abs[ti, fold_var_idx] = fi
+        except Exception as exc:
+            _progress("training", pct, f"SHAP fallback fold {fold_i + 1} ({exc})")
+            fi = _feature_importance_vector(clf)
+            for test_row in test_idx:
+                sample_shap_abs[test_row, fold_var_idx] = fi
             fold_shap_abs_sum[fold_var_idx] += fi * len(test_idx)
             fold_shap_count += len(test_idx)
 
-    # Average across folds
+        if max_panel_genes > 0:
+            panel_candidate_n = min(max(n_top_genes, max_panel_genes), len(fold_var_idx))
+            candidate_local = np.argsort(this_fi)[-panel_candidate_n:][::-1]
+            candidate_idx = fold_var_idx[candidate_local].tolist()
+
+            _progress("optimal", 68 + int((fold_i + 1) / n_splits * 20), f"Nested panel selection {fold_i + 1}/{n_splits}")
+            panel_result = _panel_selection_order(
+                X_train_all,
+                y_train,
+                candidate_idx,
+                all_gene_names,
+                panel_method=panel_method,
+                model=model,
+                n_estimators=n_estimators,
+                needs_scaling=needs_scaling,
+                n_splits=n_splits,
+                max_genes=max_panel_genes,
+            )
+            ordered_idx = list(panel_result["ordered_idx"])
+            if ordered_idx:
+                heldout_curve = _evaluate_prefix_auc_curve(
+                    X_train_all,
+                    y_train,
+                    X_test_all,
+                    y_test,
+                    ordered_idx,
+                    all_gene_names,
+                    model=model,
+                    n_estimators=n_estimators,
+                    needs_scaling=needs_scaling,
+                    n_classes=n_classes,
+                )
+                panel_orders.append(panel_result)
+                selection_curves.append(list(panel_result["inner_auc_curve"]))
+                heldout_curves.append(heldout_curve)
+
     avg_importances = fold_importances / n_splits
     avg_shap_mean = fold_shap_abs_sum / max(fold_shap_count, 1)
     accuracy = float(np.mean(fold_accuracies))
 
-    _progress("shap", 75, "SHAP aggregated across folds")
+    _progress("shap", 76, "SHAP aggregated across folds")
 
-    # 5. Top genes by SHAP value (more interpretable than raw model importance)
     top_idx = np.argsort(avg_shap_mean)[-n_top_genes:][::-1]
 
-    # 6. Aggregate out-of-fold ROC (unbiased — each fold selected genes
-    #    from training-only importance and evaluated on the held-out test set)
-    _progress("auc", 80, "Aggregating out-of-fold ROC curves")
+    _progress("auc", 82, "Aggregating out-of-fold ROC curves")
     roc_data = []
-    for ci, cls in enumerate(le.classes_):
-        if fold_roc_tprs[ci]:
-            mean_tpr = np.mean(fold_roc_tprs[ci], axis=0)
+    for class_idx, class_name in enumerate(le.classes_):
+        if fold_roc_tprs[class_idx]:
+            mean_tpr = np.mean(fold_roc_tprs[class_idx], axis=0)
             mean_tpr[-1] = 1.0
-            roc_data.append({
-                "group": str(cls),
-                "fpr": roc_mean_fpr.tolist(),
-                "tpr": mean_tpr.tolist(),
-                "auc": float(np.mean(fold_roc_aucs[ci])),
-                "std": float(np.std(fold_roc_aucs[ci])),
-            })
+            roc_data.append(
+                {
+                    "group": str(class_name),
+                    "fpr": roc_mean_fpr.tolist(),
+                    "tpr": mean_tpr.tolist(),
+                    "auc": float(np.mean(fold_roc_aucs[class_idx])),
+                    "std": float(np.std(fold_roc_aucs[class_idx])),
+                }
+            )
         else:
-            roc_data.append({
-                "group": str(cls),
-                "fpr": roc_mean_fpr.tolist(),
-                "tpr": roc_mean_fpr.tolist(),
-                "auc": 0.5,
-                "std": 0.0,
-            })
+            roc_data.append(
+                {
+                    "group": str(class_name),
+                    "fpr": roc_mean_fpr.tolist(),
+                    "tpr": roc_mean_fpr.tolist(),
+                    "auc": 0.5,
+                    "std": 0.0,
+                }
+            )
 
-    # 7. Optimal gene combination (dispatched by panel_method)
-    max_panel = min(n_top_genes, 15)
-    combo_args = dict(
-        X_filt=X_all, y=y, top_idx=top_idx, filt_names=all_gene_names,
-        classes=le.classes_, model=model, n_estimators=n_estimators,
-        needs_scaling=needs_scaling, n_splits=n_splits, max_genes=max_panel,
+    _progress("optimal", 92, "Aggregating nested panel performance")
+    optimal_combo = _aggregate_panel_summary(
+        panel_orders,
+        selection_curves,
+        heldout_curves,
+        all_gene_names,
+        method=panel_method,
     )
-
-    if panel_method == "lasso":
-        _progress("optimal", 85, "Running LASSO panel selection")
-        optimal_combo = _lasso_panel(**combo_args, progress_fn=_progress)
-    elif panel_method == "stability":
-        _progress("optimal", 85, "Running Stability Selection")
-        optimal_combo = _stability_panel(**combo_args, progress_fn=_progress)
-    elif panel_method == "mrmr":
-        _progress("optimal", 85, "Running mRMR panel selection")
-        optimal_combo = _mrmr_panel(**combo_args, progress_fn=_progress)
-    else:
-        _progress("optimal", 88, "Finding optimal gene combination")
-        optimal_combo = _find_optimal_combination(**combo_args)
-
     _progress("complete", 100, "Analysis complete")
 
-    # 8. Compile results
-    top_genes = []
-    for rank, idx in enumerate(top_idx):
-        top_genes.append({
+    top_genes = [
+        {
             "rank": rank + 1,
             "symbol": all_gene_names[idx],
             "importance": float(avg_importances[idx]),
             "shap_mean_abs": float(avg_shap_mean[idx]),
-        })
-
-    shap_plot_data = []
-    for rank, idx in enumerate(top_idx):
-        shap_plot_data.append({
+        }
+        for rank, idx in enumerate(top_idx)
+    ]
+    shap_plot_data = [
+        {
             "gene": all_gene_names[idx],
             "values": sample_shap_abs[:, idx].tolist(),
             "expression": X_all[:, idx].tolist(),
-        })
+        }
+        for idx in top_idx
+    ]
 
     return {
         "top_genes": top_genes,
@@ -436,386 +949,11 @@ def run_biomarker_analysis(
         "optimal_combo": optimal_combo,
         "model": model_display,
         "panel_method": panel_method,
-    }
-
-
-# ──────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────
-
-def _find_optimal_combination(
-    X_filt, y, top_idx, filt_names, classes,
-    model, n_estimators, needs_scaling,
-    n_splits=5, max_genes=15,
-):
-    """Forward selection with independent inner CV."""
-    n_classes = len(classes)
-    min_class = int(min(np.bincount(y)))
-    inner_splits = max(2, min(n_splits, min_class))
-    inner_cv = StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=123)
-
-    y_bin = label_binarize(y, classes=range(n_classes))
-    if n_classes == 2:
-        y_bin = np.column_stack([1 - y_bin.ravel(), y_bin.ravel()])
-
-    candidate_pool = list(top_idx[:max_genes])
-    selected = []
-    auc_curve = []
-    best_auc = 0.0
-    best_set = []
-
-    for step in range(min(max_genes, len(candidate_pool))):
-        best_step_auc = -1
-        best_gene = None
-
-        for gene_idx in candidate_pool:
-            if gene_idx in selected:
-                continue
-            trial = selected + [gene_idx]
-            X_trial = X_filt[:, trial]
-            try:
-                mean_auc = _quick_cv_auc(
-                    X_trial, y, y_bin, n_classes,
-                    model, n_estimators, needs_scaling, inner_cv,
-                )
-            except Exception:
-                continue
-            if mean_auc > best_step_auc:
-                best_step_auc = mean_auc
-                best_gene = gene_idx
-
-        if best_gene is None:
-            break
-        selected.append(best_gene)
-        auc_curve.append({
-            "n_genes": len(selected),
-            "auc": round(best_step_auc, 4),
-            "gene_added": filt_names[best_gene],
-        })
-
-        if best_step_auc > best_auc:
-            best_auc = best_step_auc
-            best_set = list(selected)
-
-    best_gene_names = [filt_names[i] for i in best_set]
-
-    return {
-        "best_genes": best_gene_names,
-        "best_auc": round(best_auc, 4),
-        "n_genes": len(best_set),
-        "auc_curve": auc_curve,
-        "method": "forward",
-        "auc_note": "cv_model_selection",
-    }
-
-
-def _quick_cv_auc(X, y, y_bin, n_classes, model, n_estimators, needs_scaling, cv):
-    """Compute mean CV-AUC across all classes (fast, fewer trees)."""
-    aucs = []
-    # Use fewer estimators for speed during forward selection
-    quick_n = min(100, n_estimators)
-
-    for train_idx, test_idx in cv.split(X, y):
-        clf, _, _ = _build_model(model, quick_n, len(train_idx))
-
-        X_train, X_test = X[train_idx], X[test_idx]
-        if needs_scaling:
-            scaler = StandardScaler()
-            X_train = scaler.fit_transform(X_train)
-            X_test = scaler.transform(X_test)
-
-        clf.fit(X_train, y[train_idx])
-        y_prob = clf.predict_proba(X_test)
-
-        for i in range(n_classes):
-            if i < y_prob.shape[1]:
-                fpr, tpr, _ = roc_curve(y_bin[test_idx, i], y_prob[:, i])
-                aucs.append(auc(fpr, tpr))
-
-    return float(np.mean(aucs)) if aucs else 0.5
-
-
-def _build_auc_curve(X_filt, y, ordered_idx, filt_names, classes,
-                     model, n_estimators, needs_scaling, n_splits):
-    """Build step-by-step AUC curve for an ordered list of gene indices."""
-    n_classes = len(classes)
-    min_class = int(min(np.bincount(y)))
-    inner_splits = max(2, min(n_splits, min_class))
-    inner_cv = StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=123)
-    y_bin = label_binarize(y, classes=range(n_classes))
-    if n_classes == 2:
-        y_bin = np.column_stack([1 - y_bin.ravel(), y_bin.ravel()])
-
-    auc_curve = []
-    best_auc = 0.0
-    best_n = 0
-    for k in range(1, len(ordered_idx) + 1):
-        X_sub = X_filt[:, ordered_idx[:k]]
-        try:
-            mean_auc = _quick_cv_auc(X_sub, y, y_bin, n_classes,
-                                     model, n_estimators, needs_scaling, inner_cv)
-        except Exception:
-            mean_auc = 0.5
-        auc_curve.append({
-            "n_genes": k,
-            "auc": round(mean_auc, 4),
-            "gene_added": filt_names[ordered_idx[k - 1]],
-        })
-        if mean_auc > best_auc:
-            best_auc = mean_auc
-            best_n = k
-    best_genes = [filt_names[ordered_idx[i]] for i in range(best_n)]
-    return auc_curve, best_genes, round(best_auc, 4), best_n
-
-
-# ── LASSO panel selection ──
-
-def _lasso_panel(X_filt, y, top_idx, filt_names, classes,
-                 model, n_estimators, needs_scaling,
-                 n_splits=5, max_genes=15, progress_fn=None):
-    """Select genes via L1-penalized logistic regression."""
-    from sklearn.linear_model import LogisticRegression
-
-    candidate_idx = list(top_idx[:max_genes])
-    X_cand = X_filt[:, candidate_idx]
-
-    # Scale for LASSO
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_cand)
-
-    n_classes = len(classes)
-    multi = "ovr" if n_classes > 2 else "auto"
-
-    # Scan C values to find one that selects a reasonable number of genes
-    best_c, best_sel = None, []
-    for C_val in np.logspace(-3, 1, 20):
-        try:
-            lr = LogisticRegression(
-                penalty="l1", C=C_val, solver="saga", max_iter=5000,
-                multi_class=multi, class_weight="balanced", random_state=42,
+        "warnings": warnings,
+        "performance_scope": {
+            "panel_method": (
+                "Compact panel metrics below use nested outer-CV. "
+                "Top-gene SHAP ranking and ROC above remain out-of-fold summaries of the selected ML model."
             )
-            lr.fit(X_scaled, y)
-            coef = np.abs(lr.coef_)
-            if coef.ndim > 1:
-                coef = np.mean(coef, axis=0)
-            else:
-                coef = coef.ravel()
-            nonzero = np.where(coef > 1e-10)[0]
-            if 1 <= len(nonzero) <= max_genes:
-                if len(nonzero) > len(best_sel):
-                    best_c = C_val
-                    best_sel = nonzero.tolist()
-                    best_coef = coef
-        except Exception:
-            continue
-
-    if progress_fn:
-        progress_fn("optimal", 90, f"LASSO selected {len(best_sel)} genes")
-
-    if not best_sel:
-        # Fallback: use all candidates ranked by a moderate LASSO
-        try:
-            lr = LogisticRegression(
-                penalty="l1", C=1.0, solver="saga", max_iter=5000,
-                multi_class=multi, class_weight="balanced", random_state=42,
-            )
-            lr.fit(X_scaled, y)
-            coef = np.abs(lr.coef_)
-            if coef.ndim > 1:
-                coef = np.mean(coef, axis=0)
-            else:
-                coef = coef.ravel()
-            ranked = np.argsort(coef)[::-1][:max_genes]
-            ordered_idx = [candidate_idx[i] for i in ranked]
-        except Exception:
-            ordered_idx = candidate_idx[:max_genes]
-    else:
-        # Rank selected genes by |coefficient|
-        ranked = sorted(best_sel, key=lambda i: best_coef[i], reverse=True)
-        ordered_idx = [candidate_idx[i] for i in ranked]
-
-    # Build AUC curve
-    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
-        X_filt, y, ordered_idx, filt_names, classes,
-        model, n_estimators, needs_scaling, n_splits,
-    )
-
-    if progress_fn:
-        progress_fn("optimal", 97, "LASSO panel complete")
-
-    return {
-        "best_genes": best_genes,
-        "best_auc": best_auc,
-        "n_genes": best_n,
-        "auc_curve": auc_curve,
-        "method": "lasso",
-        "auc_note": "cv_model_selection",
-    }
-
-
-# ── Stability Selection ──
-
-def _stability_panel(X_filt, y, top_idx, filt_names, classes,
-                     model, n_estimators, needs_scaling,
-                     n_splits=5, max_genes=15, progress_fn=None):
-    """Bootstrap LASSO for stable gene selection."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import StratifiedShuffleSplit
-
-    candidate_idx = list(top_idx[:max_genes])
-    X_cand = X_filt[:, candidate_idx]
-    n_cand = len(candidate_idx)
-    n_classes = len(classes)
-    multi = "ovr" if n_classes > 2 else "auto"
-
-    n_bootstrap = 100
-    freq = np.zeros(n_cand)
-
-    splitter = StratifiedShuffleSplit(n_splits=n_bootstrap, test_size=0.2, random_state=42)
-
-    for i, (train_idx, _) in enumerate(splitter.split(X_cand, y)):
-        if progress_fn and i % 20 == 0:
-            pct = 85 + int(i / n_bootstrap * 10)
-            progress_fn("optimal", pct, f"Stability bootstrap {i}/{n_bootstrap}")
-
-        X_sub = X_cand[train_idx]
-        y_sub = y[train_idx]
-
-        scaler = StandardScaler()
-        X_sub_s = scaler.fit_transform(X_sub)
-
-        try:
-            lr = LogisticRegression(
-                penalty="l1", C=0.5, solver="saga", max_iter=2000,
-                multi_class=multi, class_weight="balanced", random_state=i,
-            )
-            lr.fit(X_sub_s, y_sub)
-            coef = np.abs(lr.coef_)
-            if coef.ndim > 1:
-                coef = np.mean(coef, axis=0)
-            else:
-                coef = coef.ravel()
-            freq[coef > 1e-10] += 1
-        except Exception:
-            continue
-
-    freq /= n_bootstrap  # selection frequency [0, 1]
-
-    if progress_fn:
-        progress_fn("optimal", 95, "Computing stability ranking")
-
-    # Adaptive threshold: start at 0.7, lower if too few genes selected
-    threshold = 0.7
-    while threshold >= 0.3:
-        stable_mask = freq >= threshold
-        if np.sum(stable_mask) >= 2:
-            break
-        threshold -= 0.1
-
-    if np.sum(freq >= threshold) < 2:
-        # Fallback: rank all genes with any selection by frequency
-        ranked = np.argsort(freq)[::-1][:max_genes]
-    else:
-        # Take genes meeting the stability threshold, ranked by frequency
-        stable_indices = np.where(freq >= threshold)[0]
-        ranked = sorted(stable_indices, key=lambda i: freq[i], reverse=True)[:max_genes]
-
-    ordered_idx = [candidate_idx[i] for i in ranked]
-
-    # Build AUC curve
-    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
-        X_filt, y, ordered_idx, filt_names, classes,
-        model, n_estimators, needs_scaling, n_splits,
-    )
-
-    if progress_fn:
-        progress_fn("optimal", 97, "Stability Selection complete")
-
-    return {
-        "best_genes": best_genes,
-        "best_auc": best_auc,
-        "n_genes": best_n,
-        "auc_curve": auc_curve,
-        "method": "stability",
-        "auc_note": "cv_model_selection",
-    }
-
-
-# ── mRMR (minimum Redundancy Maximum Relevance) ──
-
-def _mrmr_panel(X_filt, y, top_idx, filt_names, classes,
-                model, n_estimators, needs_scaling,
-                n_splits=5, max_genes=15, progress_fn=None):
-    """Greedy mRMR feature selection using mutual information."""
-    from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
-
-    candidate_idx = list(top_idx[:max_genes])
-    X_cand = X_filt[:, candidate_idx]
-    n_cand = len(candidate_idx)
-
-    # Precompute relevance: MI(gene, target)
-    relevance = mutual_info_classif(X_cand, y, random_state=42)
-
-    if progress_fn:
-        progress_fn("optimal", 88, "mRMR: relevance computed")
-
-    # Greedy selection
-    selected_local = []  # indices into candidate_idx
-    remaining = set(range(n_cand))
-
-    for step in range(min(max_genes, n_cand)):
-        if not remaining:
-            break
-
-        if step == 0:
-            # First gene: highest relevance
-            best_idx = max(remaining, key=lambda i: relevance[i])
-        else:
-            # Score = relevance - mean redundancy with selected set
-            best_score = -np.inf
-            best_idx = None
-            for cand in remaining:
-                # Redundancy: mean MI with already-selected genes
-                redundancy = 0.0
-                for sel in selected_local:
-                    mi = mutual_info_regression(
-                        X_cand[:, sel].reshape(-1, 1),
-                        X_cand[:, cand],
-                        random_state=42,
-                    )[0]
-                    redundancy += mi
-                redundancy /= len(selected_local)
-                score = relevance[cand] - redundancy
-                if score > best_score:
-                    best_score = score
-                    best_idx = cand
-
-            if best_idx is None:
-                break
-
-        selected_local.append(best_idx)
-        remaining.discard(best_idx)
-
-        if progress_fn and step % 3 == 0:
-            pct = 88 + int(step / max_genes * 9)
-            progress_fn("optimal", pct, f"mRMR step {step + 1}/{max_genes}")
-
-    ordered_idx = [candidate_idx[i] for i in selected_local]
-
-    # Build AUC curve
-    auc_curve, best_genes, best_auc, best_n = _build_auc_curve(
-        X_filt, y, ordered_idx, filt_names, classes,
-        model, n_estimators, needs_scaling, n_splits,
-    )
-
-    if progress_fn:
-        progress_fn("optimal", 97, "mRMR panel complete")
-
-    return {
-        "best_genes": best_genes,
-        "best_auc": best_auc,
-        "n_genes": best_n,
-        "auc_curve": auc_curve,
-        "method": "mrmr",
-        "auc_note": "cv_model_selection",
+        },
     }

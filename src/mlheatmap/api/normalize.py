@@ -16,7 +16,12 @@ class NormalizeRequest(BaseModel):
 async def normalize(request: Request, body: NormalizeRequest):
     """Normalize count matrix."""
     import numpy as np
-    from mlheatmap.core.normalization import deseq2_normalize, log2_normalize, tpm_normalize
+    from mlheatmap.core.normalization import (
+        deseq2_normalize,
+        log2_normalize,
+        tpm_abundance,
+        tpm_normalize,
+    )
 
     session = request.app.state.sessions.get(body.session_id)
     if not session or session.raw_counts is None:
@@ -28,12 +33,18 @@ async def normalize(request: Request, body: NormalizeRequest):
     if body.method == "deseq2":
         normalized, size_factors = deseq2_normalize(counts, return_size_factors=True)
         session.size_factors = size_factors
+        session.deg_abundance = counts / size_factors[np.newaxis, :]
+        session.deg_effect_size_basis = "size_factor_normalized_counts"
     elif body.method == "tpm":
         normalized = tpm_normalize(counts)
         session.size_factors = None
+        session.deg_abundance = tpm_abundance(counts)
+        session.deg_effect_size_basis = "tpm"
     elif body.method == "log2":
         normalized = log2_normalize(counts)
         session.size_factors = None
+        session.deg_abundance = counts.copy()
+        session.deg_effect_size_basis = "counts"
     else:
         return JSONResponse({"error": f"Unknown method: {body.method}"}, status_code=400)
 
@@ -42,6 +53,11 @@ async def normalize(request: Request, body: NormalizeRequest):
     session.norm_method = body.method
     session.gene_names = df.index.tolist()
     session.sample_names = df.columns.tolist()
+    session.metadata["normalization"] = {
+        "method": body.method,
+        "shape": [int(normalized.shape[0]), int(normalized.shape[1])],
+        "effect_size_basis": session.deg_effect_size_basis,
+    }
 
     finite = normalized[np.isfinite(normalized)]
     stats = {

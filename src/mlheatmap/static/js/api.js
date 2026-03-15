@@ -12,7 +12,12 @@ const API = {
         const formData = new FormData();
         formData.append('file', file);
         const res = await fetch(`${this.baseUrl}/upload`, { method: 'POST', body: formData });
-        if (!res.ok) throw new Error((await res.json()).error || 'Upload failed');
+        if (!res.ok) {
+            const payload = await res.json();
+            const err = new Error(payload.error || 'Upload failed');
+            Object.assign(err, payload);
+            throw err;
+        }
         return res.json();
     },
 

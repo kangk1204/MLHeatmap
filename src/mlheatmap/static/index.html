@@ -32,7 +32,7 @@
                     </div>
                     <div class="logo-text">
                         <span class="logo-name">MLHeatmap</span>
-                        <span class="logo-version">v0.1.0</span>
+                        <span class="logo-version">v1.0.0</span>
                     </div>
                 </div>
             </div>
@@ -109,7 +109,7 @@
             <section class="panel active" id="panel-upload">
                 <div class="panel-header">
                     <h1>Upload Count Matrix</h1>
-                    <p class="panel-subtitle">Upload your Bulk RNA-seq raw read count matrix (CSV, TSV, or Excel)</p>
+                    <p class="panel-subtitle">Upload a Bulk RNA-seq count matrix (CSV, TSV, or Excel). Files must be fully numeric after the gene-id column.</p>
                 </div>
 
                 <div class="upload-zone" id="upload-zone">
@@ -234,7 +234,7 @@
                     <div class="method-card glass-card selected" data-method="deseq2">
                         <div class="method-icon">📊</div>
                         <h3>DESeq2-like VST</h3>
-                        <p>Median-of-ratios normalization with variance-stabilizing transform. Best for differential analysis.</p>
+                        <p>Median-of-ratios normalization with a VST-style transform. This is a normalization method, not the DESeq2 differential test itself.</p>
                         <span class="method-badge">Recommended</span>
                     </div>
                     <div class="method-card glass-card" data-method="tpm">
@@ -334,7 +334,7 @@
             <section class="panel" id="panel-biomarker">
                 <div class="panel-header">
                     <h1>Biomarker Discovery</h1>
-                    <p class="panel-subtitle">Find group-discriminating genes using ML + SHAP analysis or DEG</p>
+                    <p class="panel-subtitle">Find group-discriminating genes using ML + SHAP analysis or exploratory DEG</p>
                 </div>
 
                 <!-- Method Tabs -->
@@ -417,6 +417,7 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Run DEG Analysis
                     </button>
+                    <p class="method-desc">Exploratory DEG uses Wilcoxon or Welch testing on normalized data. log2FC is computed from a linear-scale abundance basis matched to the selected normalization.</p>
                 </div>
 
                 <div class="progress-container hidden" id="biomarker-progress">
@@ -427,6 +428,8 @@
                 </div>
 
                 <div class="biomarker-results hidden" id="biomarker-results">
+                    <div class="glass-card hidden" id="biomarker-analysis-warnings"></div>
+                    <p class="method-desc" id="panel-method-scope-note"></p>
                     <div class="results-grid">
                         <div class="glass-card result-card">
                             <h3>SHAP Feature Importance</h3>
@@ -472,6 +475,7 @@
 
                 <!-- DEG Results -->
                 <div class="biomarker-results hidden" id="deg-results">
+                    <p class="method-desc hidden" id="deg-results-note"></p>
                     <div class="results-grid">
                         <div class="glass-card result-card">
                             <h3>Volcano Plot</h3>
