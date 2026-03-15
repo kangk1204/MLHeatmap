@@ -1,5 +1,10 @@
 """Tests for core modules."""
 
+import gzip
+import io
+import time
+import zipfile
+
 import numpy as np
 import pytest
 
@@ -127,6 +132,20 @@ class TestClustering:
 
         assert len(result["x"]) == 1
 
+    def test_invalid_heatmap_params_raise(self):
+        from mlheatmap.core.clustering import compute_heatmap_data
+
+        expression = np.array([[1.0, 2.0], [3.0, 4.0]])
+        with pytest.raises(ValueError):
+            compute_heatmap_data(expression, ["G1", "G2"], ["S1", "S2"], distance="invalid")
+
+    def test_no_samples_raise(self):
+        from mlheatmap.core.clustering import compute_heatmap_data
+
+        expression = np.empty((2, 0))
+        with pytest.raises(ValueError):
+            compute_heatmap_data(expression, ["G1", "G2"], [], top_n=2)
+
 
 class TestGeneMapping:
     """Tests for gene ID detection and mapping."""
@@ -239,6 +258,25 @@ class TestSession:
         assert store.get(s1.id) is None
         # s2 just created, should still be accessible (even with ttl=0, just created)
 
+    def test_active_operation_lease_blocks_cleanup(self):
+        from mlheatmap.api.session import SessionStore
+
+        store = SessionStore(ttl_hours=0)
+        session = store.create()
+        leased = store.begin_use(session.id)
+        assert leased is session
+
+        with session.state_lock:
+            session.last_accessed_at = time.time() - 60
+        store._cleanup()
+        assert store.get(session.id) is session
+
+        store.end_use(session.id)
+        with session.state_lock:
+            session.last_accessed_at = time.time() - 60
+        store._cleanup()
+        assert store.get(session.id) is None
+
 
 class TestBiomarker:
     """Tests for biomarker analysis core logic."""
@@ -326,6 +364,44 @@ class TestDEG:
         assert result["results"][0]["log2fc"] == pytest.approx(
             np.log2(effect_size_data[0, :2].mean() + 1) - np.log2(effect_size_data[0, 2:].mean() + 1)
         )
+
+    def test_bh_handles_empty_input(self):
+        from mlheatmap.core.deg import _benjamini_hochberg
+
+        result = _benjamini_hochberg(np.array([], dtype=float))
+        assert result.shape == (0,)
+
+
+class TestInputIO:
+    def test_load_count_matrix_rejects_legacy_xls(self):
+        from mlheatmap.core.input_io import MatrixValidationError, load_count_matrix_bytes
+
+        with pytest.raises(MatrixValidationError):
+            load_count_matrix_bytes(b"not-a-real-xls", "legacy.xls")
+
+    def test_gzip_upload_guard_rejects_archive_expansion(self, monkeypatch):
+        from mlheatmap.core.input_io import MatrixValidationError, load_count_matrix_bytes
+
+        csv_payload = "gene_id,S1\nGeneA,1\n" + ("GeneB,2\n" * 2048)
+        gz_buffer = io.BytesIO()
+        with gzip.GzipFile(fileobj=gz_buffer, mode="wb") as compressed:
+            compressed.write(csv_payload.encode("utf-8"))
+
+        monkeypatch.setattr("mlheatmap.core.input_io.MAX_EXPANDED_UPLOAD_BYTES", 1024)
+        with pytest.raises(MatrixValidationError):
+            load_count_matrix_bytes(gz_buffer.getvalue(), "counts.csv.gz")
+
+    def test_xlsx_upload_guard_rejects_oversized_archive(self, monkeypatch):
+        from mlheatmap.core.input_io import MatrixValidationError, load_count_matrix_bytes
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as workbook:
+            workbook.writestr("[Content_Types].xml", "<Types/>")
+            workbook.writestr("xl/worksheets/sheet1.xml", "A" * 4096)
+
+        monkeypatch.setattr("mlheatmap.core.input_io.MAX_EXPANDED_UPLOAD_BYTES", 1024)
+        with pytest.raises(MatrixValidationError):
+            load_count_matrix_bytes(zip_buffer.getvalue(), "oversized.xlsx")
 
 
 class TestExport:

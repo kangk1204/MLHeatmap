@@ -1,8 +1,10 @@
 """API integration tests using FastAPI TestClient."""
 
+import asyncio
 import os
 import json
 import threading
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -141,6 +143,32 @@ class TestUpload:
         data = r.json()
         assert data["shape"][0] > 0  # Some genes should survive filtering
 
+    def test_upload_reads_with_bounded_size(self):
+        from mlheatmap.api.session import SessionStore
+        from mlheatmap.api.upload import upload_file
+
+        class DummyUpload:
+            def __init__(self):
+                self.filename = "../unsafe.csv"
+                self.requested_size = None
+                self.closed = False
+
+            async def read(self, size=-1):
+                self.requested_size = size
+                return b"x" * 2
+
+            async def close(self):
+                self.closed = True
+
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(sessions=SessionStore())))
+        upload = DummyUpload()
+        with patch("mlheatmap.api.upload.MAX_UPLOAD_BYTES", 1):
+            response = asyncio.run(upload_file(request, upload))
+
+        assert response.status_code == 413
+        assert upload.requested_size == 2
+        assert upload.closed is True
+
 
 # ──────────────────────────────────────────────
 # Gene Mapping Tests
@@ -166,7 +194,7 @@ class TestGeneMapping:
             "species": "human",
             "id_type": "auto",
         })
-        assert r.status_code == 404
+        assert r.status_code in (400, 404)
 
 
 # ──────────────────────────────────────────────
@@ -205,7 +233,14 @@ class TestNormalize:
             "session_id": "nonexistent",
             "method": "log2",
         })
-        assert r.status_code == 404
+        assert r.status_code in (400, 404)
+
+    def test_normalize_invalid_session_uuid(self, client):
+        r = client.post("/api/v1/normalize", json={
+            "session_id": "not-a-uuid",
+            "method": "log2",
+        })
+        assert r.status_code == 400
 
 
 # ──────────────────────────────────────────────
@@ -252,9 +287,32 @@ class TestGroups:
         assert r.status_code == 200
         assert samples[0] in r.json()["remaining"]
 
+    def test_include_restores_original_group_assignment(self, client):
+        path = os.path.join(DATA_DIR, "small_quick_test.csv")
+        with open(path, "rb") as f:
+            r = client.post("/api/v1/upload", files={"file": ("test.csv", f, "text/csv")})
+        assert r.status_code == 200
+        sid = r.json()["session_id"]
+        samples = r.json()["sample_names"]
+        groups = {"Ctrl": samples[:3], "Drug": samples[3:]}
+
+        r = client.post("/api/v1/groups", json={"session_id": sid, "groups": groups})
+        assert r.status_code == 200
+
+        r = client.post("/api/v1/groups/exclude", json={"session_id": sid, "samples": [samples[0]]})
+        assert r.status_code == 200
+
+        r = client.post("/api/v1/groups/include", json={"session_id": sid, "samples": [samples[0]]})
+        assert r.status_code == 200
+        assert r.json()["restored_groups"] == {samples[0]: "Ctrl"}
+
+        r = client.get(f"/api/v1/groups?session_id={sid}")
+        assert r.status_code == 200
+        assert samples[0] in r.json()["groups"]["Ctrl"]
+
     def test_groups_invalid_session(self, client):
         r = client.get("/api/v1/groups?session_id=nonexistent")
-        assert r.status_code == 404
+        assert r.status_code in (400, 404)
 
 
 # ──────────────────────────────────────────────
@@ -283,7 +341,21 @@ class TestHeatmap:
 
     def test_heatmap_no_data(self, client):
         r = client.get("/api/v1/heatmap?session_id=nonexistent&top_n=50")
-        assert r.status_code == 404
+        assert r.status_code in (400, 404)
+
+    def test_heatmap_rejects_invalid_distance(self, client, uploaded_session):
+        sid = uploaded_session["session_id"]
+
+        r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20&distance=invalid_metric")
+        assert r.status_code == 400
+        assert "Unknown distance metric" in r.json()["error"]
+
+    def test_heatmap_rejects_invalid_ward_distance_combo(self, client, uploaded_session):
+        sid = uploaded_session["session_id"]
+
+        r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20&distance=correlation&linkage=ward")
+        assert r.status_code == 400
+        assert "Ward linkage requires euclidean distance" in r.json()["error"]
 
     def test_heatmap_without_column_clustering_groups_samples(self, client):
         sid, samples, _ = _prepare_deg_session(client)
@@ -301,6 +373,20 @@ class TestHeatmap:
         assert r.status_code == 200
         data = r.json()
         assert data["x"] == interleaved_groups["Group A"] + interleaved_groups["Group B"]
+
+    def test_heatmap_rejects_all_samples_excluded(self, client):
+        sid, samples, _ = _prepare_deg_session(client)
+
+        r = client.post("/api/v1/groups/exclude", json={"session_id": sid, "samples": samples})
+        assert r.status_code == 200
+
+        r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20")
+        assert r.status_code == 400
+        assert "No samples remain after exclusion" in r.json()["error"]
+
+        r = client.get(f"/api/v1/heatmap/render?session_id={sid}&top_n=20")
+        assert r.status_code == 400
+        assert "No samples remain after exclusion" in r.json()["error"]
 
 
 class TestDEG:
@@ -341,6 +427,45 @@ class TestDEG:
         data = r.json()
         assert data["effect_size_basis"] == "counts"
         assert data["normalization_method"] == "log2"
+
+    def test_deg_response_preserves_full_plot_results_when_table_is_truncated(self, client):
+        sid, _, _ = _prepare_deg_session(client)
+
+        large_results = [
+            {
+                "gene": f"Gene{i}",
+                "gene_idx": i,
+                "log2fc": 2.0 if i % 5000 == 0 else 0.1,
+                "pvalue": 1e-6 if i % 5000 == 0 else 0.5,
+                "adj_pvalue": 1e-6 if i % 5000 == 0 else 0.5,
+                "mean_g1": 1.0,
+                "mean_g2": 1.0,
+                "neg_log10_p": 6.0 if i % 5000 == 0 else 0.3,
+                "direction": "up" if i % 5000 == 0 else "ns",
+            }
+            for i in range(25050)
+        ]
+        fake_result = {
+            "results": large_results,
+            "summary": {"n_up": 6, "n_down": 0, "n_not_significant": 25044, "n_total": 25050},
+            "group_names": ["Case", "Control"],
+            "comparison_group": "Case",
+            "reference_group": "Control",
+            "thresholds": {"log2fc": 1.0, "pvalue": 0.05},
+            "method": "wilcoxon",
+            "pvalue_type": "fdr",
+            "effect_size_basis": "counts",
+        }
+
+        with patch("mlheatmap.core.deg.compute_deg", return_value=fake_result):
+            r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["results_truncated"] is True
+        assert len(data["plot_results"]) == 25050
+        assert len(data["table_results"]) < len(data["plot_results"])
+        assert data["result_counts"]["plot"] == 25050
 
 
 class TestReentryAndConcurrency:
@@ -610,3 +735,22 @@ class TestStaticFiles:
                     "heatmap.js", "biomarker.js", "export.js"]:
             r = client.get(f"/static/js/{js}")
             assert r.status_code == 200, f"Failed to load {js}"
+
+    def test_export_rejects_invalid_session_uuid(self, client):
+        r = client.get("/api/v1/export?session_id=not-a-uuid&type=results_excel")
+        assert r.status_code == 400
+
+    def test_export_snapshot_is_isolated_from_live_session_mutation(self, client):
+        from mlheatmap.api.export import _snapshot_export_session
+
+        sid, _, _ = _prepare_deg_session(client)
+        session = client.app.state.sessions.get(sid)
+        assert session is not None
+
+        snapshot = _snapshot_export_session(session)
+        with session.state_lock:
+            session.gene_names.append("InjectedGene")
+            session.groups["Injected"] = ["SampleX"]
+
+        assert "InjectedGene" not in snapshot.gene_names
+        assert "Injected" not in snapshot.groups

@@ -67,6 +67,16 @@ def test_capabilities_endpoint_reports_core_runtime():
     assert data["models"]["rf"]["available"] is True
 
 
+def test_app_limits_cors_to_local_origins():
+    from mlheatmap.server import LOCAL_ORIGIN_REGEX, create_app
+
+    app = create_app()
+    cors = next(middleware for middleware in app.user_middleware if middleware.cls.__name__ == "CORSMiddleware")
+
+    assert cors.kwargs["allow_origins"] == []
+    assert cors.kwargs["allow_origin_regex"] == LOCAL_ORIGIN_REGEX
+
+
 def test_packaged_gene_tables_exist():
     from importlib import resources
 

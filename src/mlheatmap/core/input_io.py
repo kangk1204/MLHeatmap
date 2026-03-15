@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import gzip
 import io
 from pathlib import Path
+import zipfile
 
 import numpy as np
 import pandas as pd
+
+
+MAX_EXPANDED_UPLOAD_BYTES = 1024 * 1024 * 1024
 
 
 class MatrixValidationError(ValueError):
@@ -35,11 +40,59 @@ class MatrixValidationError(ValueError):
         return payload
 
 
+def _read_gzip_with_limit(content: bytes, *, max_output_bytes: int | None = None) -> bytes:
+    """Safely decompress gzip input while enforcing a maximum output size."""
+    max_output_bytes = max_output_bytes or MAX_EXPANDED_UPLOAD_BYTES
+    output = io.BytesIO()
+    total = 0
+    with gzip.GzipFile(fileobj=io.BytesIO(content)) as compressed:
+        while True:
+            chunk = compressed.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_output_bytes:
+                raise MatrixValidationError(
+                    "Compressed input expands beyond the supported size limit. "
+                    "Please upload a smaller matrix."
+                )
+            output.write(chunk)
+    return output.getvalue()
+
+
+def _validate_excel_archive_size(content: bytes, *, max_output_bytes: int | None = None) -> None:
+    """Reject oversized XLSX archives before handing them to openpyxl."""
+    max_output_bytes = max_output_bytes or MAX_EXPANDED_UPLOAD_BYTES
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as workbook:
+            total_uncompressed = sum(info.file_size for info in workbook.infolist())
+    except zipfile.BadZipFile as exc:
+        raise MatrixValidationError("Invalid XLSX file") from exc
+    if total_uncompressed > max_output_bytes:
+        raise MatrixValidationError(
+            "Excel input expands beyond the supported size limit. "
+            "Please upload a smaller matrix."
+        )
+
+
 def load_count_matrix_bytes(content: bytes, filename: str) -> pd.DataFrame:
     """Parse a CSV/TSV/XLSX count matrix using the first column as gene ids."""
     name = (filename or "data.csv").lower()
-    if name.endswith((".xlsx", ".xls")):
+    if name.endswith(".xls"):
+        raise MatrixValidationError(
+            "Legacy .xls files are not supported. Please save the matrix as .xlsx, .csv, or .tsv."
+        )
+    if name.endswith(".xlsx"):
+        _validate_excel_archive_size(content)
         return pd.read_excel(io.BytesIO(content), index_col=0, engine="openpyxl")
+    if name.endswith(".tsv.gz") or name.endswith(".txt.gz"):
+        decompressed = _read_gzip_with_limit(content)
+        return pd.read_csv(io.BytesIO(decompressed), sep="\t", index_col=0, comment="#")
+    if name.endswith(".csv.gz"):
+        decompressed = _read_gzip_with_limit(content)
+        return pd.read_csv(io.BytesIO(decompressed), index_col=0, comment="#")
+    if name.endswith(".gz"):
+        raise MatrixValidationError("Compressed uploads must use .csv.gz, .tsv.gz, or .txt.gz extensions.")
     if name.endswith((".tsv", ".txt")):
         return pd.read_csv(io.BytesIO(content), sep="\t", index_col=0, comment="#")
     return pd.read_csv(io.BytesIO(content), index_col=0, comment="#")
@@ -90,8 +143,9 @@ def strict_numeric_matrix(df: pd.DataFrame) -> pd.DataFrame:
         index=trimmed.index,
         columns=trimmed.columns,
     )
-    if invalid_mask.to_numpy().any():
-        invalid_positions = np.argwhere(invalid_mask.to_numpy())
+    invalid_array = invalid_mask.to_numpy()
+    if invalid_array.any():
+        invalid_positions = np.argwhere(invalid_array)
         invalid_cell_count += int(invalid_positions.shape[0])
         invalid_columns.update(str(trimmed.columns[col_idx]) for _, col_idx in invalid_positions.tolist())
         remaining_slots = max(0, 20 - len(invalid_examples))
