@@ -130,6 +130,17 @@ async def biomarker_stream(
                 )
                 return
             session.biomarker_results = result
+            session.metadata["biomarker"] = {
+                "model": normalized_model,
+                "model_label": result.get("model", normalized_model),
+                "panel_method": panel_method,
+                "n_top_genes": n_top_genes,
+                "n_estimators": n_estimators,
+                "cv_folds_requested": cv_folds,
+                "cv_folds_used": min(cv_folds, min(len(v) for v in sample_groups.values())),
+                "roc_evaluation": result.get("roc_evaluation"),
+                "panel_evaluation": result.get("optimal_combo", {}).get("evaluation"),
+            }
             yield f"event: complete\ndata: {json.dumps(result, default=_json_safe)}\n\n"
         except Exception as exc:
             traceback.print_exc()
@@ -197,13 +208,6 @@ async def deg_analysis(
             reference_group: sample_groups[reference_group],
         }
 
-    sf_counts = None
-    if session.norm_method == "deseq2" and session.size_factors is not None:
-        df = session.mapped_counts if session.mapped_counts is not None else session.raw_counts
-        if df is not None:
-            raw = df.values.astype(float)
-            sf_counts = raw / session.size_factors[np.newaxis, :]
-
     from mlheatmap.core.deg import compute_deg
 
     result = compute_deg(
@@ -214,13 +218,24 @@ async def deg_analysis(
         log2fc_threshold=log2fc_threshold,
         pvalue_threshold=pvalue_threshold,
         use_raw_pvalue=use_raw_pvalue,
-        raw_counts=sf_counts,
+        effect_size_data=session.deg_abundance,
+        effect_size_basis=session.deg_effect_size_basis,
     )
 
     if session.analysis_revision != start_revision:
         return _stale_inputs_response()
 
     session.deg_results = result
+    session.metadata["deg"] = {
+        "method": method,
+        "pvalue_type": result.get("pvalue_type", "fdr"),
+        "log2fc_threshold": log2fc_threshold,
+        "pvalue_threshold": pvalue_threshold,
+        "reference_group": result.get("reference_group", ""),
+        "comparison_group": result.get("comparison_group", ""),
+        "effect_size_basis": result.get("effect_size_basis", session.deg_effect_size_basis),
+        "normalization_method": session.norm_method,
+    }
 
     all_results = result["results"]
     if len(all_results) > 20000:
@@ -242,6 +257,8 @@ async def deg_analysis(
             "thresholds": result["thresholds"],
             "method": result["method"],
             "pvalue_type": result.get("pvalue_type", "fdr"),
+            "effect_size_basis": result.get("effect_size_basis", session.deg_effect_size_basis),
+            "normalization_method": session.norm_method,
         },
         headers={"Content-Type": "application/json"},
     )

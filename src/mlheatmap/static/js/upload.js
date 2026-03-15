@@ -101,7 +101,12 @@ const Upload = {
                 if (radio) radio.checked = true;
             }
         } catch (err) {
-            App.showToast(err.message, 'error');
+            if (err.invalid_columns && err.invalid_columns.length > 0) {
+                const cols = err.invalid_columns.slice(0, 3).join(', ');
+                App.showToast(`${err.message} Problem columns: ${cols}`, 'error');
+            } else {
+                App.showToast(err.message, 'error');
+            }
         } finally {
             App.hideLoading();
         }

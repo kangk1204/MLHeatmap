@@ -64,6 +64,16 @@ class TestNormalization:
         assert result.shape == counts.shape
         assert np.all(np.isfinite(result))
 
+    def test_tpm_abundance_returns_linear_scale_values(self):
+        from mlheatmap.core.normalization import tpm_abundance
+
+        counts = np.array([[100, 200], [300, 400], [600, 400]], dtype=float)
+        abundance = tpm_abundance(counts)
+
+        assert abundance.shape == counts.shape
+        assert np.all(np.isfinite(abundance))
+        assert np.all(abundance >= 0)
+
 
 class TestClustering:
     """Tests for hierarchical clustering."""
@@ -266,6 +276,9 @@ class TestBiomarker:
         assert "optimal_combo" in result
         assert len(result["top_genes"]) == 10
         assert 0 <= result["accuracy"] <= 1
+        assert result["optimal_combo"]["evaluation"] == "nested_outer_cv"
+        assert "auc_std" in result["optimal_combo"]
+        assert "selection_frequency" in result["optimal_combo"]
 
     def test_cv_folds_clamped(self):
         """CV folds should be clamped to min class count but never below 2."""
@@ -292,6 +305,27 @@ class TestBiomarker:
         )
 
         assert "accuracy" in result
+
+
+class TestDEG:
+    def test_log2fc_uses_linear_scale_effect_size_basis(self):
+        from mlheatmap.core.deg import compute_deg
+
+        normalized = np.array([[1.0, 6.65821148, 5.67242534, 5.67242534]], dtype=float)
+        effect_size_data = np.array([[1.0, 100.0, 50.0, 50.0]], dtype=float)
+
+        result = compute_deg(
+            expression=normalized,
+            gene_names=["Gene1"],
+            sample_groups={"Case": [0, 1], "Control": [2, 3]},
+            effect_size_data=effect_size_data,
+            effect_size_basis="counts",
+        )
+
+        assert result["effect_size_basis"] == "counts"
+        assert result["results"][0]["log2fc"] == pytest.approx(
+            np.log2(effect_size_data[0, :2].mean() + 1) - np.log2(effect_size_data[0, 2:].mean() + 1)
+        )
 
 
 class TestExport:

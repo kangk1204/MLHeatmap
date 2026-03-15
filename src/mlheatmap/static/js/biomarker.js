@@ -357,7 +357,7 @@ const Biomarker = {
         const badge = document.getElementById('accuracy-badge');
         const color = acc >= 0.9 ? '#10b981' : acc >= 0.7 ? '#f59e0b' : '#ef4444';
         const modelName = data.model || 'Random Forest';
-        badge.textContent = `${modelName} — CV Accuracy: ${(acc * 100).toFixed(1)}%`;
+        badge.textContent = `${modelName} — Nested CV accuracy: ${(acc * 100).toFixed(1)}%`;
         badge.style.background = `${color}20`;
         badge.style.color = color;
         badge.style.border = `1px solid ${color}40`;
@@ -378,7 +378,7 @@ const Biomarker = {
         if (scopeNote) {
             const scope = data.performance_scope || {};
             scopeNote.textContent = scope.panel_method
-                || 'Compact Panel Selection only changes the optimal compact panel below. SHAP, ROC and CV accuracy reflect the selected ML model.';
+                || 'Compact panel metrics below use nested outer-CV. SHAP, ROC and accuracy above reflect the selected ML model with out-of-fold evaluation.';
         }
 
         // SHAP plot
@@ -529,10 +529,10 @@ const Biomarker = {
         // Method description (dynamic based on method used)
         const descEl = document.getElementById('optimal-method-desc');
         const methodDescs = {
-            forward: 'Forward selection from SHAP top candidates: at each step, the gene yielding the highest CV-AUC is added. Selection order may differ from SHAP ranking.',
-            lasso: 'LASSO (L1-penalized logistic regression) selects genes with non-zero coefficients, ranked by absolute coefficient magnitude. Naturally produces sparse panels.',
-            stability: 'Stability Selection bootstraps LASSO 100× on random 80% subsamples. Genes selected in ≥70% of iterations are deemed stable. Ranked by selection frequency.',
-            mrmr: 'mRMR (minimum Redundancy Maximum Relevance) greedily selects genes maximizing mutual information with the target while minimizing redundancy with already-selected genes.',
+            forward: 'Forward selection runs inside each training fold. Genes are added in the order that maximizes inner-CV AUC on the training split only.',
+            lasso: 'LASSO uses sparse logistic models on each training fold, then nested CV reports held-out panel performance separately from fold-local selection.',
+            stability: 'Stability Selection bootstraps LASSO inside each training fold. Consensus genes below are ranked by cross-fold selection frequency and mean rank.',
+            mrmr: 'mRMR selects genes inside each training fold by balancing relevance and redundancy. The panel summary below reports nested outer-CV held-out AUC.',
         };
         descEl.textContent = methodDescs[combo.method] || methodDescs.forward;
 
@@ -544,16 +544,15 @@ const Biomarker = {
         const badge = document.createElement('div');
         badge.className = 'optimal-badge';
         badge.style.cssText = `background:${color}15;border:1px solid ${color}40;color:${color}`;
-        badge.textContent = `Best AUC: ${aucPct}% with ${combo.n_genes} gene${combo.n_genes > 1 ? 's' : ''}`;
+        badge.textContent = `Nested outer-CV panel AUC: ${aucPct}% ± ${((combo.auc_std || 0) * 100).toFixed(1)}% with ${combo.n_genes} gene${combo.n_genes > 1 ? 's' : ''}`;
         summary.appendChild(badge);
 
         // Panel AUC note — distinguish from the out-of-fold ROC above
         const noteEl = document.getElementById('panel-auc-note');
         if (noteEl) {
-            if (combo.auc_note === 'cv_model_selection') {
-                noteEl.textContent = 'Panel AUC is an internal cross-validation estimate used for gene selection. '
-                    + 'It may be optimistic compared to the out-of-fold ROC above. '
-                    + 'For publication, report the ROC curve AUC as the primary performance metric.';
+            if (combo.auc_note === 'nested_outer_cv') {
+                noteEl.textContent = 'Panel size is chosen by inner cross-validation on each training fold. '
+                    + 'The plotted panel AUC below is the mean held-out AUC from the outer folds, and the consensus genes are aggregated from fold-local panels.';
                 noteEl.classList.remove('hidden');
             } else {
                 noteEl.classList.add('hidden');
@@ -572,10 +571,11 @@ const Biomarker = {
                 const sr = shapRankMap[c.gene_added];
                 return sr ? `+${c.gene_added} (SHAP #${sr})` : `+${c.gene_added}`;
             }),
-            hovertemplate: '<b>%{x} genes</b><br>AUC: %{y:.4f}<br>Added: %{text}<extra></extra>',
+            customdata: curve.map(c => [c.selection_auc || null, c.std || 0]),
+            hovertemplate: '<b>%{x} genes</b><br>Held-out AUC: %{y:.4f}<br>Selection CV-AUC: %{customdata[0]:.4f}<br>Outer-fold SD: %{customdata[1]:.4f}<br>Added: %{text}<extra></extra>',
         };
         // Highlight best point
-        let bestIdx = curve.findIndex(c => c.auc === combo.best_auc);
+        let bestIdx = curve.findIndex(c => c.n_genes === combo.n_genes);
         if (bestIdx < 0) bestIdx = curve.reduce((bi, c, i, arr) => c.auc > arr[bi].auc ? i : bi, 0);
         const bestTrace = {
             x: [curve[bestIdx].n_genes],
@@ -596,7 +596,7 @@ const Biomarker = {
                 dtick: 1,
             },
             yaxis: {
-                title: { text: 'Mean CV-AUC', font: { size: 12 } },
+                title: { text: 'Mean held-out AUC', font: { size: 12 } },
                 gridcolor: 'rgba(255,255,255,0.04)',
                 zeroline: false,
                 range: [Math.max(0, Math.min(...curve.map(c => c.auc)) - 0.05), 1.02],
@@ -626,6 +626,16 @@ const Biomarker = {
                 const tag = document.createElement('span');
                 tag.className = 'shap-rank-tag';
                 tag.textContent = `SHAP #${shapRank}`;
+                chip.appendChild(tag);
+            }
+
+            const freqInfo = Array.isArray(combo.selection_frequency)
+                ? combo.selection_frequency.find(item => item.gene === gene)
+                : null;
+            if (freqInfo) {
+                const tag = document.createElement('span');
+                tag.className = 'shap-rank-tag';
+                tag.textContent = `${(freqInfo.frequency * 100).toFixed(0)}% folds`;
                 chip.appendChild(tag);
             }
 
@@ -755,15 +765,10 @@ const Biomarker = {
 
         const degNote = document.getElementById('deg-results-note');
         if (degNote) {
-            const counts = data.result_counts || {};
-            if (data.results_truncated) {
-                degNote.textContent = `Volcano plot uses all ${counts.plot || counts.full} genes. `
-                    + `The table below is limited to ${counts.table || data.results.length} ranked rows for responsiveness.`;
-                degNote.classList.remove('hidden');
-            } else {
-                degNote.textContent = `Volcano plot and table currently use all ${counts.full || data.results.length} genes.`;
-                degNote.classList.remove('hidden');
-            }
+            const basis = (data.effect_size_basis || 'normalized_expression').replaceAll('_', ' ');
+            const norm = data.normalization_method || 'normalized';
+            degNote.textContent = `Exploratory DEG on ${norm} data. log2FC is computed from ${basis} on the linear scale; the statistical test remains ${data.method}.`;
+            degNote.classList.remove('hidden');
         }
 
         // Volcano plot

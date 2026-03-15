@@ -75,24 +75,27 @@ def _vst_transform(normalized: np.ndarray) -> np.ndarray:
     return result
 
 
-def tpm_normalize(counts: np.ndarray, gene_lengths: np.ndarray = None) -> np.ndarray:
-    """TPM normalization with log2 transform.
-
-    If gene_lengths not provided, uses CPM + log2 instead.
-    """
+def tpm_abundance(counts: np.ndarray, gene_lengths: np.ndarray = None) -> np.ndarray:
+    """Return linear TPM abundance or CPM fallback when gene lengths are absent."""
     counts = counts.astype(np.float64)
 
     if gene_lengths is not None and len(gene_lengths) == counts.shape[0]:
         rpk = counts / (gene_lengths[:, np.newaxis] / 1000.0 + 1e-6)
         scale = np.sum(rpk, axis=0) / 1e6
         scale = np.maximum(scale, 1e-6)
-        tpm = rpk / scale[np.newaxis, :]
-    else:
-        # Fallback to CPM
-        lib_sizes = np.sum(counts, axis=0)
-        lib_sizes = np.maximum(lib_sizes, 1.0)
-        tpm = counts / lib_sizes[np.newaxis, :] * 1e6
+        return rpk / scale[np.newaxis, :]
 
+    lib_sizes = np.sum(counts, axis=0)
+    lib_sizes = np.maximum(lib_sizes, 1.0)
+    return counts / lib_sizes[np.newaxis, :] * 1e6
+
+
+def tpm_normalize(counts: np.ndarray, gene_lengths: np.ndarray = None) -> np.ndarray:
+    """TPM normalization with log2 transform.
+
+    If gene_lengths not provided, uses CPM + log2 instead.
+    """
+    tpm = tpm_abundance(counts, gene_lengths=gene_lengths)
     return np.log2(tpm + 1)
 
 

@@ -1,6 +1,7 @@
 """API integration tests using FastAPI TestClient."""
 
 import os
+import json
 import threading
 from unittest.mock import patch
 
@@ -41,6 +42,17 @@ def _prepare_deg_session(client):
     assert r.status_code == 200
 
     return sid, samples, groups
+
+
+def _extract_sse_event_payload(text: str, event_name: str) -> dict:
+    blocks = text.split("\n\n")
+    for block in blocks:
+        if f"event: {event_name}" not in block:
+            continue
+        for line in block.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line[len("data: "):])
+    raise AssertionError(f"SSE event '{event_name}' not found")
 
 
 @pytest.fixture(scope="module")
@@ -104,6 +116,14 @@ class TestUpload:
         r = client.post("/api/v1/upload", files={"file": ("bad.csv", b"not,valid\ndata", "text/csv")})
         # Should return 400 or 200 with empty result
         assert r.status_code in (200, 400)
+
+    def test_upload_rejects_partial_missing_or_nonnumeric_cells(self, client):
+        bad_csv = b"gene_id,S1,S2\nGeneA,10,\nGeneB,5,abc\n"
+        r = client.post("/api/v1/upload", files={"file": ("bad.csv", bad_csv, "text/csv")})
+        assert r.status_code == 400
+        data = r.json()
+        assert data["invalid_cell_count"] == 2
+        assert "S2" in data["invalid_columns"]
 
     def test_upload_with_filtering_info(self, client):
         path = os.path.join(DATA_DIR, "human_ensembl_12samples.csv")
@@ -313,6 +333,15 @@ class TestDEG:
         assert r.status_code == 400
         assert "no valid samples after exclusion" in r.json()["error"]
 
+    def test_deg_response_includes_effect_size_basis(self, client):
+        sid, _, _ = _prepare_deg_session(client)
+
+        r = client.get(f"/api/v1/biomarker/deg?session_id={sid}&reference_group=Control")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["effect_size_basis"] == "counts"
+        assert data["normalization_method"] == "log2"
+
 
 class TestReentryAndConcurrency:
     def test_group_change_invalidates_existing_ml_and_deg_results(self, client):
@@ -326,6 +355,10 @@ class TestReentryAndConcurrency:
         )
         assert r.status_code == 200
         assert "event: complete" in r.text
+        complete = _extract_sse_event_payload(r.text, "complete")
+        assert complete["optimal_combo"]["evaluation"] == "nested_outer_cv"
+        assert "auc_std" in complete["optimal_combo"]
+        assert isinstance(complete["optimal_combo"]["selection_frequency"], list)
 
         new_groups = {
             "Alt A": [samples[0], samples[2], samples[4]],
