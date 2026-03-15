@@ -50,6 +50,12 @@ Each installer:
 - Runs `mlheatmap --self-check`
 - Starts the app locally
 
+Validation note:
+
+- On the validation machine used for this repository, system Python `3.11`/`3.12` was not available.
+- Verification therefore used a user-scope Python `3.12` bootstrap path before creating the local `.venv`.
+- The app and tests still completed successfully, but that validation path is not the same as reproducing the README with a preinstalled system Python.
+
 After installation, restart with:
 
 ```bash
