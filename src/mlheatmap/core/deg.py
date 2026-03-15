@@ -7,6 +7,8 @@ between two or more groups.
 import numpy as np
 from scipy import stats
 
+MIN_POSITIVE_PVALUE = float(np.nextafter(0.0, 1.0))
+
 
 def compute_deg(
     expression: np.ndarray,
@@ -134,7 +136,8 @@ def compute_deg(
 
         # Use raw or adjusted p-value for significance and display
         p_for_sig = r["pvalue"] if use_raw_pvalue else r["adj_pvalue"]
-        r["neg_log10_p"] = float(-np.log10(max(p_for_sig, 1e-300)))
+        clipped_p = float(np.clip(p_for_sig, MIN_POSITIVE_PVALUE, 1.0))
+        r["neg_log10_p"] = float(-np.log10(clipped_p))
 
         # Classification
         is_sig = p_for_sig < pvalue_threshold
@@ -176,6 +179,8 @@ def compute_deg(
 def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
     """Benjamini-Hochberg FDR correction."""
     n = len(pvals)
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
     sorted_idx = np.argsort(pvals)
     sorted_pvals = pvals[sorted_idx]
 

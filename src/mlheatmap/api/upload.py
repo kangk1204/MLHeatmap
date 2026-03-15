@@ -5,10 +5,13 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["upload"])
 
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+
 
 @router.post("/upload")
 async def upload_file(request: Request, file: UploadFile = File(...)):
     """Upload a count matrix file (CSV/TSV/XLSX)."""
+    from mlheatmap.api.validation import sanitize_upload_filename
     from mlheatmap.core.gene_mapping import detect_id_type
     from mlheatmap.core.input_io import (
         MatrixValidationError,
@@ -17,17 +20,15 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         strict_numeric_matrix,
     )
 
-    sessions = request.app.state.sessions
-    session = sessions.create()
-
-    content = await file.read()
-    max_size = 500 * 1024 * 1024  # 500 MB
-    if len(content) > max_size:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        await file.close()
         return JSONResponse(
-            {"error": f"File too large ({len(content) // (1024*1024)} MB). Maximum is 500 MB."},
+            {"error": f"File too large ({len(content) // (1024 * 1024)} MB). Maximum is 500 MB."},
             status_code=413,
         )
-    filename = file.filename or "data.csv"
+
+    filename = sanitize_upload_filename(file.filename)
 
     try:
         parsed = load_count_matrix_bytes(content, filename)
@@ -36,9 +37,10 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         return JSONResponse(exc.to_payload(), status_code=400)
     except Exception as exc:
         return JSONResponse({"error": f"Failed to parse file: {exc}"}, status_code=400)
+    finally:
+        await file.close()
 
     df = df.loc[(df != 0).any(axis=1)]
-
     if df.empty:
         return JSONResponse({"error": "No valid numeric data found"}, status_code=400)
 
@@ -47,6 +49,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     gene_ids = df.index.astype(str).tolist()
     species, id_type = detect_id_type(gene_ids)
 
+    session = request.app.state.sessions.create()
     session.raw_counts = df
     session.sample_names = df.columns.tolist()
     session.gene_names = gene_ids
@@ -58,7 +61,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         "detected_species": species,
         "detected_id_type": id_type,
         "filtering": filtering,
-        "max_upload_mb": max_size // (1024 * 1024),
+        "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
     }
 
     preview = df.head(10).reset_index()

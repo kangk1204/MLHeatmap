@@ -734,10 +734,12 @@ def run_biomarker_analysis(
             f"Requested {cv_folds} CV folds, but the smallest class has only {min_class_count} sample(s). "
             f"Using {n_splits} folds instead."
         )
+    shap_fallback_used = False
+    shap_fallback_folds: list[int] = []
 
     fold_importances = np.zeros(n_all_genes, dtype=np.float64)
     fold_shap_abs_sum = np.zeros(n_all_genes, dtype=np.float64)
-    fold_shap_count = 0
+    fold_shap_counts = np.zeros(n_all_genes, dtype=np.float64)
     fold_accuracies: list[float] = []
     sample_shap_abs = np.zeros((len(y), n_all_genes), dtype=np.float64)
 
@@ -829,15 +831,17 @@ def run_biomarker_analysis(
             if shap_abs_fold.ndim == 1:
                 shap_abs_fold = shap_abs_fold.reshape(1, -1)
             fold_shap_abs_sum[fold_var_idx] += np.sum(shap_abs_fold, axis=0)
-            fold_shap_count += shap_abs_fold.shape[0]
+            fold_shap_counts[fold_var_idx] += shap_abs_fold.shape[0]
             sample_shap_abs[np.ix_(test_idx, fold_var_idx)] = shap_abs_fold
         except Exception as exc:
+            shap_fallback_used = True
+            shap_fallback_folds.append(fold_i + 1)
             _progress("training", pct, f"SHAP fallback fold {fold_i + 1} ({exc})")
             fi = _feature_importance_vector(clf)
             for test_row in test_idx:
                 sample_shap_abs[test_row, fold_var_idx] = fi
             fold_shap_abs_sum[fold_var_idx] += fi * len(test_idx)
-            fold_shap_count += len(test_idx)
+            fold_shap_counts[fold_var_idx] += len(test_idx)
 
         if max_panel_genes > 0:
             panel_candidate_n = min(max(n_top_genes, max_panel_genes), len(fold_var_idx))
@@ -876,7 +880,7 @@ def run_biomarker_analysis(
                 heldout_curves.append(heldout_curve)
 
     avg_importances = fold_importances / n_splits
-    avg_shap_mean = fold_shap_abs_sum / max(fold_shap_count, 1)
+    avg_shap_mean = fold_shap_abs_sum / np.maximum(fold_shap_counts, 1.0)
     accuracy = float(np.mean(fold_accuracies))
 
     _progress("shap", 76, "SHAP aggregated across folds")
@@ -919,6 +923,12 @@ def run_biomarker_analysis(
     )
     _progress("complete", 100, "Analysis complete")
 
+    if shap_fallback_used:
+        warnings.append(
+            "SHAP could not be computed for one or more CV folds. "
+            "Feature importance values were used as a fallback for those folds."
+        )
+
     top_genes = [
         {
             "rank": rank + 1,
@@ -949,6 +959,10 @@ def run_biomarker_analysis(
         "optimal_combo": optimal_combo,
         "model": model_display,
         "panel_method": panel_method,
+        "cv_folds_requested": cv_folds,
+        "cv_folds_used": n_splits,
+        "shap_fallback_used": shap_fallback_used,
+        "shap_fallback_folds": shap_fallback_folds,
         "warnings": warnings,
         "performance_scope": {
             "panel_method": (

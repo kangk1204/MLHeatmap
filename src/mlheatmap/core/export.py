@@ -81,7 +81,7 @@ def export_results_excel(session) -> bytes:
                     index=False,
                 )
 
-        if getattr(session, "deg_results", None):
+        if session.deg_results:
             deg_data = session.deg_results["results"]
             deg_df = pd.DataFrame(deg_data)
             col_order = [

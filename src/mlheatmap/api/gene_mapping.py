@@ -1,10 +1,12 @@
 """Gene mapping API endpoint."""
 
+from __future__ import annotations
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-import pandas as pd
+from mlheatmap.api.validation import get_session_or_error
 
 router = APIRouter(tags=["gene-mapping"])
 
@@ -20,48 +22,52 @@ async def map_genes(request: Request, body: MappingRequest):
     """Map gene IDs to gene symbols."""
     from mlheatmap.core.gene_mapping import map_gene_ids
 
-    session = request.app.state.sessions.get(body.session_id)
-    if not session or session.raw_counts is None:
-        return JSONResponse({"error": "Session not found or no data"}, status_code=404)
+    session, error, _ = get_session_or_error(request, body.session_id, not_found_message="Session not found or no data")
+    if error is not None:
+        return error
 
-    gene_ids = session.raw_counts.index.astype(str).tolist()
+    with session.state_lock:
+        if session.raw_counts is None:
+            return JSONResponse({"error": "Session not found or no data"}, status_code=404)
+        raw_counts = session.raw_counts.copy()
+
+    gene_ids = raw_counts.index.astype(str).tolist()
     mapping, unmapped = map_gene_ids(gene_ids, body.species, body.id_type)
+    warning = None
 
     if mapping:
-        # Remap the DataFrame
-        df = session.raw_counts.copy()
+        df = raw_counts.copy()
         df.index = df.index.astype(str)
-
-        # Map gene IDs to symbols
-        df["_symbol"] = df.index.map(lambda x: mapping.get(str(x), None))
+        df["_symbol"] = df.index.map(lambda gene_id: mapping.get(str(gene_id)))
         df = df.dropna(subset=["_symbol"])
-
-        # Aggregate duplicates by summing
         df = df.groupby("_symbol").sum()
         df.index.name = None
-
-        session.mapped_counts = df
-        session.gene_names = df.index.tolist()
-        session.sample_names = df.columns.tolist()
-        session.species = body.species
+        mapped_counts = df
     else:
-        # No mapping available, use raw IDs
-        session.mapped_counts = session.raw_counts.copy()
-        session.gene_names = session.raw_counts.index.astype(str).tolist()
+        mapped_counts = raw_counts.copy()
+        warning = "No gene mappings were found. Continuing with raw uploaded identifiers."
 
-    # Invalidate downstream state — row space has changed
-    session.invalidate_normalization()
-    session.metadata["mapping"] = {
-        "species": body.species,
-        "id_type": body.id_type,
-        "mapped_count": len(mapping),
-        "unmapped_count": len(unmapped),
-        "total": len(gene_ids),
-    }
+    with session.state_lock:
+        session.mapped_counts = mapped_counts
+        session.gene_names = mapped_counts.index.astype(str).tolist()
+        session.sample_names = mapped_counts.columns.tolist()
+        session.species = body.species
+        session._invalidate_normalization_unlocked()
+        session.metadata["mapping"] = {
+            "species": body.species,
+            "id_type": body.id_type,
+            "mapped_count": len(mapping),
+            "unmapped_count": len(unmapped),
+            "total": len(gene_ids),
+            "used_raw_ids": not bool(mapping),
+        }
 
-    return {
+    response = {
         "mapped_count": len(mapping),
         "unmapped_count": len(unmapped),
         "total": len(gene_ids),
         "unmapped_sample": unmapped[:50],
     }
+    if warning:
+        response["warning"] = warning
+    return response
