@@ -15,6 +15,13 @@ mlheatmap
 
 The app starts on `http://127.0.0.1:8765`.
 
+To run the test suite from a local clone:
+
+```bash
+pip install .[test]
+pytest
+```
+
 ### One-step installers
 
 Windows:
