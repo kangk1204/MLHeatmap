@@ -31,11 +31,12 @@ const API = {
         return res.json();
     },
 
-    async normalize(sessionId, method) {
+    async normalize(sessionId, method, opts = {}) {
         const res = await fetch(`${this.baseUrl}/normalize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ session_id: sessionId, method }),
+            signal: opts.signal,
         });
         if (!res.ok) throw new Error((await res.json()).error || 'Normalization failed');
         return res.json();
@@ -51,7 +52,7 @@ const API = {
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });
-        const res = await fetch(`${this.baseUrl}/heatmap?${params}`);
+        const res = await fetch(`${this.baseUrl}/heatmap?${params}`, { signal: opts.signal });
         if (!res.ok) throw new Error((await res.json()).error || 'Heatmap failed');
         return res.json();
     },
@@ -110,7 +111,7 @@ const API = {
             fmt: opts.fmt || 'png',
             dpi: opts.dpi || 150,
         });
-        const res = await fetch(`${this.baseUrl}/heatmap/render?${params}`);
+        const res = await fetch(`${this.baseUrl}/heatmap/render?${params}`, { signal: opts.signal });
         if (!res.ok) {
             const err = await res.json();
             throw new Error(err.error || 'Server render failed');
@@ -129,7 +130,7 @@ const API = {
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });
-        const res = await fetch(`${this.baseUrl}/heatmap/shap?${params}`);
+        const res = await fetch(`${this.baseUrl}/heatmap/shap?${params}`, { signal: opts.signal });
         if (!res.ok) throw new Error((await res.json()).error || 'SHAP heatmap failed');
         return res.json();
     },
@@ -145,7 +146,7 @@ const API = {
         if (opts.referenceGroup) {
             params.set('reference_group', opts.referenceGroup);
         }
-        const res = await fetch(`${this.baseUrl}/biomarker/deg?${params}`);
+        const res = await fetch(`${this.baseUrl}/biomarker/deg?${params}`, { signal: opts.signal });
         if (!res.ok) throw new Error((await res.json()).error || 'DEG analysis failed');
         return res.json();
     },
@@ -160,8 +161,28 @@ const API = {
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });
-        const res = await fetch(`${this.baseUrl}/heatmap/deg?${params}`);
+        const res = await fetch(`${this.baseUrl}/heatmap/deg?${params}`, { signal: opts.signal });
         if (!res.ok) throw new Error((await res.json()).error || 'DEG heatmap failed');
+        return res.json();
+    },
+
+    async cancelSession(sessionId) {
+        const res = await fetch(`${this.baseUrl}/session/cancel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Session cancel failed');
+        return res.json();
+    },
+
+    async purgeSession(sessionId) {
+        const res = await fetch(`${this.baseUrl}/session/purge`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Session purge failed');
         return res.json();
     },
 

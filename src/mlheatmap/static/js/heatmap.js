@@ -4,6 +4,7 @@ const Heatmap = {
     _isDegMode: false,
     _requestToken: 0,
     _pendingRequest: false,
+    _abortController: null,
     _serverImageUrl: null,  // Track blob URL for cleanup
     _maxGenes: 60000,  // Updated after normalization
     _activeMax: 60000, // Current mode's effective max (changes per mode)
@@ -36,7 +37,20 @@ const Heatmap = {
         const hadPending = this._pendingRequest;
         this._requestToken += 1;
         this._pendingRequest = false;
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+        }
+        if (hadPending && App.state.sessionId) {
+            API.cancelSession(App.state.sessionId).catch(() => {});
+        }
         if (hadPending) App.hideLoading();
+    },
+
+    _newAbortController() {
+        if (this._abortController) this._abortController.abort();
+        this._abortController = new AbortController();
+        return this._abortController;
     },
 
     /** Consolidate dendrogram branches into a single trace using null separators. */
@@ -235,6 +249,7 @@ const Heatmap = {
 
         const requestToken = ++this._requestToken;
         this._pendingRequest = true;
+        const controller = this._newAbortController();
         App.showLoading('Computing heatmap...');
         try {
             const clusterRowsEl = document.getElementById('cluster-rows');
@@ -246,6 +261,7 @@ const Heatmap = {
                 colorScale: document.getElementById('colorscale-select').value,
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
+                signal: controller.signal,
             });
             if (requestToken !== this._requestToken) return;
 
@@ -259,8 +275,10 @@ const Heatmap = {
             App.markStepCompleted('heatmap');
         } catch (err) {
             if (requestToken !== this._requestToken) return;
+            if (err.name === 'AbortError') return;
             App.showToast(err.message, 'error');
         } finally {
+            if (this._abortController === controller) this._abortController = null;
             if (requestToken !== this._requestToken) return;
             this._pendingRequest = false;
             App.hideLoading();
@@ -269,6 +287,7 @@ const Heatmap = {
 
     async renderServerSide(topN, requestToken = ++this._requestToken) {
         this._pendingRequest = true;
+        const controller = this._newAbortController();
         App.showLoading(`Rendering ${topN.toLocaleString()} genes on server...`);
         try {
             // Clean up previous blob URL
@@ -287,6 +306,7 @@ const Heatmap = {
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
                 dpi: 150,
+                signal: controller.signal,
             });
             if (requestToken !== this._requestToken) {
                 URL.revokeObjectURL(imageUrl);
@@ -305,8 +325,10 @@ const Heatmap = {
             App.markStepCompleted('heatmap');
         } catch (err) {
             if (requestToken !== this._requestToken) return;
+            if (err.name === 'AbortError') return;
             App.showToast('Server render failed: ' + err.message, 'error');
         } finally {
+            if (this._abortController === controller) this._abortController = null;
             if (requestToken !== this._requestToken) return;
             this._pendingRequest = false;
             App.hideLoading();
@@ -664,6 +686,7 @@ const Heatmap = {
         this._isDegMode = false;
         const requestToken = ++this._requestToken;
         this._pendingRequest = true;
+        const controller = this._newAbortController();
 
         // Clamp slider to SHAP gene range
         const maxShapGenes = bioResults.top_genes ? bioResults.top_genes.length : 20;
@@ -689,6 +712,7 @@ const Heatmap = {
                 colorScale: document.getElementById('colorscale-select').value,
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : false,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
+                signal: controller.signal,
             });
             if (requestToken !== this._requestToken) return;
 
@@ -702,8 +726,10 @@ const Heatmap = {
             App.markStepCompleted('heatmap');
         } catch (err) {
             if (requestToken !== this._requestToken) return;
+            if (err.name === 'AbortError') return;
             App.showToast('SHAP heatmap failed: ' + err.message, 'error');
         } finally {
+            if (this._abortController === controller) this._abortController = null;
             if (requestToken !== this._requestToken) return;
             this._pendingRequest = false;
             App.hideLoading();
@@ -989,6 +1015,7 @@ const Heatmap = {
         this._isDegMode = true;
         const requestToken = ++this._requestToken;
         this._pendingRequest = true;
+        const controller = this._newAbortController();
 
         const DEG_MAX_GENES = 500;
         this._activeMax = DEG_MAX_GENES;
@@ -1016,6 +1043,7 @@ const Heatmap = {
                 colorScale: document.getElementById('colorscale-select').value,
                 clusterRows: clusterRowsEl ? clusterRowsEl.checked : true,
                 clusterCols: clusterColsEl ? clusterColsEl.checked : true,
+                signal: controller.signal,
             });
             if (requestToken !== this._requestToken) return;
 
@@ -1029,8 +1057,10 @@ const Heatmap = {
             App.markStepCompleted('heatmap');
         } catch (err) {
             if (requestToken !== this._requestToken) return;
+            if (err.name === 'AbortError') return;
             App.showToast('DEG heatmap failed: ' + err.message, 'error');
         } finally {
+            if (this._abortController === controller) this._abortController = null;
             if (requestToken !== this._requestToken) return;
             this._pendingRequest = false;
             App.hideLoading();

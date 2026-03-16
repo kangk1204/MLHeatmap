@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from mlheatmap.core.cancellation import raise_if_cancelled
 from mlheatmap.core.clustering import select_top_variable_genes, validate_heatmap_params
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ def render_heatmap_image(
     cluster_cols: bool = True,
     fmt: str = "png",
     dpi: int = 150,
+    cancel_check=None,
 ) -> bytes:
     """Render a publication-quality clustered heatmap as an image."""
     validate_heatmap_params(distance, method)
@@ -74,6 +76,7 @@ def render_heatmap_image(
         raise ValueError("No samples remain after exclusion. Re-include at least one sample.")
 
     expression = np.nan_to_num(expression, nan=0.0, posinf=0.0, neginf=0.0)
+    raise_if_cancelled(cancel_check)
     expr_sub, genes_sub, _ = select_top_variable_genes(expression, gene_names, top_n)
     n_genes = len(genes_sub)
     n_samples = len(sample_names)
@@ -86,6 +89,7 @@ def render_heatmap_image(
     z_scored = (expr_sub - row_means) / row_stds
     z_scored = np.nan_to_num(z_scored, nan=0.0, posinf=3.0, neginf=-3.0)
     z_scored = np.clip(z_scored, -3, 3)
+    raise_if_cancelled(cancel_check)
 
     df = pd.DataFrame(z_scored, index=genes_sub, columns=sample_names)
 
@@ -141,6 +145,7 @@ def render_heatmap_image(
                 "ytick.color": TEXT_SECONDARY,
             }
         ):
+            raise_if_cancelled(cancel_check)
             cluster_grid = sns.clustermap(
                 df,
                 method=method,
@@ -163,6 +168,7 @@ def render_heatmap_image(
 
             fig = cluster_grid.fig
             fig.patch.set_facecolor(BG_PRIMARY)
+            raise_if_cancelled(cancel_check)
 
             ax_heatmap = cluster_grid.ax_heatmap
             ax_heatmap.set_facecolor(BG_CARD)
@@ -207,6 +213,7 @@ def render_heatmap_image(
                     title_fontsize=max(8, min(11, 100 / len(groups))),
                 )
                 legend.get_title().set_color(TEXT_PRIMARY)
+                raise_if_cancelled(cancel_check)
 
             info_text = f"Top {n_genes:,} genes (most variable)"
             if n_genes > MAX_CLUSTER_GENES:
@@ -222,7 +229,7 @@ def render_heatmap_image(
             )
 
             fig.suptitle(
-                f"Clustered Heatmap - {n_genes:,} genes x {n_samples} samples",
+                f"Clustered Heatmap - {n_genes:,} genes x {n_samples:,} samples",
                 fontsize=12,
                 color=TEXT_PRIMARY,
                 y=0.99,
@@ -230,6 +237,7 @@ def render_heatmap_image(
             )
 
             output = io.BytesIO()
+            raise_if_cancelled(cancel_check)
             fig.savefig(
                 output,
                 format=fmt,

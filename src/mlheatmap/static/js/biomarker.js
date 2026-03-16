@@ -5,6 +5,7 @@ const Biomarker = {
     _mlRunToken: 0,
     _degRunToken: 0,
     _pendingDegRequest: false,
+    _degAbortController: null,
     VOLCANO_NS_RASTER_THRESHOLD: 4000,
 
     _escapeHtml(str) {
@@ -83,6 +84,7 @@ const Biomarker = {
     },
 
     cancelPending() {
+        const hadActiveStream = !!this._activeStream;
         const hadDegRequest = this._pendingDegRequest;
         this._mlRunToken += 1;
         this._degRunToken += 1;
@@ -90,7 +92,14 @@ const Biomarker = {
             this._activeStream.close();
             this._activeStream = null;
         }
+        if (this._degAbortController) {
+            this._degAbortController.abort();
+            this._degAbortController = null;
+        }
         this._pendingDegRequest = false;
+        if ((hadActiveStream || hadDegRequest) && App.state.sessionId) {
+            API.cancelSession(App.state.sessionId).catch(() => {});
+        }
 
         const mlBtn = document.getElementById('btn-run-biomarker');
         if (mlBtn) mlBtn.disabled = false;
@@ -693,6 +702,9 @@ const Biomarker = {
         btn.disabled = true;
         const runToken = ++this._degRunToken;
         this._pendingDegRequest = true;
+        if (this._degAbortController) this._degAbortController.abort();
+        const controller = new AbortController();
+        this._degAbortController = controller;
         App.showLoading('Running DEG analysis...');
 
         try {
@@ -704,6 +716,7 @@ const Biomarker = {
                 pvalueThreshold: parseFloat(document.getElementById('deg-pval-threshold').value),
                 useRawPvalue: useRaw,
                 referenceGroup: refGroup,
+                signal: controller.signal,
             });
             if (runToken !== this._degRunToken) return;
 
@@ -715,8 +728,10 @@ const Biomarker = {
             App.showToast(`DEG complete: ${toastUp}, ${data.summary.n_down} down`, 'success');
         } catch (err) {
             if (runToken !== this._degRunToken) return;
+            if (err.name === 'AbortError') return;
             App.showToast(err.message, 'error');
         } finally {
+            if (this._degAbortController === controller) this._degAbortController = null;
             if (runToken !== this._degRunToken) return;
             this._pendingDegRequest = false;
             btn.disabled = false;

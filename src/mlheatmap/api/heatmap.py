@@ -9,7 +9,8 @@ import numpy as np
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from mlheatmap.api.validation import acquire_session_or_error
+from mlheatmap.api.session import SessionCancelledError
+from mlheatmap.api.validation import acquire_session_lease_or_error
 from mlheatmap.core.clustering import validate_heatmap_params
 
 router = APIRouter(tags=["heatmap"])
@@ -22,6 +23,10 @@ def _stale_inputs_response():
         {"error": "Analysis inputs changed during computation. Rerun with the current settings."},
         status_code=409,
     )
+
+
+def _cancelled_response(message: str = "Analysis cancelled at user request."):
+    return JSONResponse({"error": message}, status_code=409)
 
 
 def _validate_request_params(distance: str, linkage: str, *, fmt: str | None = None) -> JSONResponse | None:
@@ -129,13 +134,14 @@ async def get_heatmap(
     if error is not None:
         return error
 
-    session, acquire_error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, acquire_error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if acquire_error is not None:
         return acquire_error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_heatmap_inputs(session)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     try:
@@ -152,6 +158,7 @@ async def get_heatmap(
             method=linkage,
             cluster_rows=cluster_rows,
             cluster_cols=cluster_cols,
+            cancel_check=lease.cancel_event.is_set,
         )
 
         with session.state_lock:
@@ -165,8 +172,10 @@ async def get_heatmap(
         response["groups"] = groups
         response["color_scale"] = color_scale
         return response
+    except SessionCancelledError as exc:
+        return _cancelled_response(str(exc))
     finally:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
 
 
 @router.get("/heatmap/render")
@@ -189,13 +198,14 @@ async def render_heatmap(
     if error is not None:
         return error
 
-    session, acquire_error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, acquire_error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if acquire_error is not None:
         return acquire_error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_heatmap_inputs(session)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     try:
@@ -216,6 +226,7 @@ async def render_heatmap(
             cluster_cols=cluster_cols,
             fmt=fmt,
             dpi=dpi,
+            cancel_check=lease.cancel_event.is_set,
         )
 
         with session.state_lock:
@@ -225,10 +236,12 @@ async def render_heatmap(
 
         media_type = "image/svg+xml" if fmt == "svg" else "image/png"
         return Response(image_bytes, media_type=media_type, headers={"Cache-Control": "no-store"})
+    except SessionCancelledError as exc:
+        return _cancelled_response(str(exc))
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
     finally:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
 
 
 @router.get("/heatmap/shap")
@@ -249,13 +262,14 @@ async def get_shap_heatmap(
     if error is not None:
         return error
 
-    session, acquire_error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, acquire_error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if acquire_error is not None:
         return acquire_error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_heatmap_inputs(session, require_biomarker=True)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     biomarker_results = snapshot["biomarker_results"]
@@ -275,7 +289,7 @@ async def get_shap_heatmap(
             found_shap.append(shap_value)
 
     if not gene_indices:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return JSONResponse({"error": "No matching genes found"}, status_code=400)
 
     try:
@@ -293,6 +307,7 @@ async def get_shap_heatmap(
             method=linkage,
             cluster_rows=cluster_rows,
             cluster_cols=cluster_cols,
+            cancel_check=lease.cancel_event.is_set,
         )
 
         with session.state_lock:
@@ -308,8 +323,10 @@ async def get_shap_heatmap(
         shap_map = dict(zip(found_symbols, found_shap))
         response["shap_values"] = [shap_map.get(gene, 0) for gene in result["y"]]
         return response
+    except SessionCancelledError as exc:
+        return _cancelled_response(str(exc))
     finally:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
 
 
 @router.get("/heatmap/deg")
@@ -330,13 +347,14 @@ async def get_deg_heatmap(
     if error is not None:
         return error
 
-    session, acquire_error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, acquire_error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if acquire_error is not None:
         return acquire_error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_heatmap_inputs(session, require_deg=True)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     deg_results = snapshot["deg_results"]
@@ -359,7 +377,7 @@ async def get_deg_heatmap(
             found_neglog10p.append(neglog10p)
 
     if not gene_indices:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return JSONResponse({"error": "No matching genes found"}, status_code=400)
 
     try:
@@ -377,6 +395,7 @@ async def get_deg_heatmap(
             method=linkage,
             cluster_rows=cluster_rows,
             cluster_cols=cluster_cols,
+            cancel_check=lease.cancel_event.is_set,
         )
 
         with session.state_lock:
@@ -398,5 +417,7 @@ async def get_deg_heatmap(
         response["log2fc_values"] = [fc_map.get(gene, 0) for gene in result["y"]]
         response["neglog10p_values"] = [nlp_map.get(gene, 0) for gene in result["y"]]
         return response
+    except SessionCancelledError as exc:
+        return _cancelled_response(str(exc))
     finally:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)

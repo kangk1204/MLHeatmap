@@ -8,6 +8,8 @@ import numpy as np
 from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
 from scipy.spatial.distance import pdist
 
+from mlheatmap.core.cancellation import raise_if_cancelled
+
 logger = logging.getLogger(__name__)
 
 VALID_DISTANCE_METRICS = {"correlation", "euclidean", "cityblock", "cosine"}
@@ -51,6 +53,7 @@ def compute_heatmap_data(
     method: str = "average",
     cluster_rows: bool = True,
     cluster_cols: bool = True,
+    cancel_check=None,
 ) -> dict:
     """Compute clustered heatmap data with dendrograms."""
     validate_heatmap_params(distance, method)
@@ -64,6 +67,7 @@ def compute_heatmap_data(
     n_genes, n_samples = expression.shape
     expression = np.nan_to_num(expression, nan=0.0, posinf=0.0, neginf=0.0)
 
+    raise_if_cancelled(cancel_check)
     expr_sub, genes_sub, _ = select_top_variable_genes(expression, gene_names, top_n)
     top_n = len(genes_sub)
 
@@ -71,6 +75,7 @@ def compute_heatmap_data(
     row_order = np.arange(top_n)
     if cluster_rows and top_n > 1:
         try:
+            raise_if_cancelled(cancel_check)
             if distance == "correlation":
                 row_dist = np.nan_to_num(pdist(expr_sub, metric="correlation"), nan=0.0)
             else:
@@ -86,6 +91,7 @@ def compute_heatmap_data(
     col_order = np.arange(n_samples)
     if cluster_cols and n_samples > 1:
         try:
+            raise_if_cancelled(cancel_check)
             col_dist = np.nan_to_num(pdist(expr_sub.T, metric=distance), nan=0.0)
             col_link = linkage(col_dist, method=method)
             col_d = dendrogram(col_link, no_plot=True)
@@ -95,6 +101,7 @@ def compute_heatmap_data(
             logger.warning("Column clustering failed: %s", exc)
 
     ordered = expr_sub[row_order][:, col_order]
+    raise_if_cancelled(cancel_check)
 
     row_means = np.mean(ordered, axis=1, keepdims=True)
     row_stds = np.std(ordered, axis=1, keepdims=True)
