@@ -91,7 +91,6 @@ Accepted formats:
 - `.tsv`
 - `.txt`
 - `.xlsx`
-- `.xls`
 
 Fail-closed validation:
 

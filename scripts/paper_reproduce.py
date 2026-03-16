@@ -33,7 +33,7 @@ def _git_commit() -> str | None:
             text=True,
         ).strip()
     except Exception:
-        return None
+        return "unknown"
 
 
 def _load_groups(path: Path) -> dict[str, list[str]]:
