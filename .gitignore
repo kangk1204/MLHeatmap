@@ -10,8 +10,14 @@ build/
 
 # Virtual environment
 .venv/
+.venv-check/
+.venv-wheel/
 venv/
 env/
+.mamba-mlheatmap/
+
+# Analysis outputs / local manuscript artifacts
+analysis/
 
 # IDE
 .vscode/
@@ -28,3 +34,6 @@ gene_tables/
 
 # Claude
 .claude/
+
+# Test / local caches
+.pytest_cache/
