@@ -90,6 +90,9 @@ Accepted formats:
 - `.csv`
 - `.tsv`
 - `.txt`
+- `.csv.gz`
+- `.tsv.gz`
+- `.txt.gz`
 - `.xlsx`
 
 Fail-closed validation:
@@ -120,9 +123,8 @@ Automatic preprocessing:
 - `optimal_combo.best_auc` is the mean held-out AUC from the outer folds
 - `optimal_combo.selection_frequency` reports how often each consensus panel gene was selected across folds
 
-Paper-safe interpretation:
+Interpretation notes:
 
-- Use `roc_data` and nested panel AUCs for manuscript performance claims
 - Do not reuse results produced before this hardening pass
 
 ### DEG analysis
@@ -136,62 +138,9 @@ DEG is exploratory in this app.
   - TPM/CPM abundance for `tpm`
   - size-factor-normalized counts for `deseq2`
 
-Paper-safe interpretation:
+Interpretation notes:
 
-- Describe this as exploratory DEG on normalized data
 - Do not describe these results as "DESeq2 differential expression" unless you run an external DESeq2 workflow
-
-## Paper Reproducibility
-
-Use the non-interactive reproduction script after any code or method change:
-
-```bash
-python scripts/paper_reproduce.py \
-  --input tests/data/human_ensembl_12samples.csv \
-  --groups-json path/to/groups.json \
-  --output-dir reproduction_out \
-  --species human \
-  --id-type auto \
-  --normalize deseq2 \
-  --model rf \
-  --panel-method forward
-```
-
-`groups.json` must be a JSON object:
-
-```json
-{
-  "Control": ["Sample1", "Sample2"],
-  "Case": ["Sample3", "Sample4"]
-}
-```
-
-The script writes:
-
-- `biomarker.json`
-- `deg.json`
-- `metadata.json`
-- `results.xlsx`
-
-`results.xlsx` includes a `Metadata` sheet with provenance for:
-
-- upload filtering
-- gene mapping
-- normalization
-- DEG settings
-- biomarker settings
-- current package version
-
-## Manuscript Checklist
-
-Before submission:
-
-- Re-run all manuscript figures and tables with `scripts/paper_reproduce.py`
-- Replace any legacy volcano table or DEG result created before the effect-size fix
-- Replace any legacy optimal panel AUC created before nested outer-CV evaluation
-- Describe DEG as exploratory Wilcoxon/Welch testing on normalized data
-- Do not write "DESeq2 analysis" when referring only to the app's normalization mode
-- Record the repository commit and Python version used for the final rerun
 
 ## Supported Platforms
 
