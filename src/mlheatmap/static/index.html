@@ -109,7 +109,7 @@
             <section class="panel active" id="panel-upload">
                 <div class="panel-header">
                     <h1>Upload Count Matrix</h1>
-                    <p class="panel-subtitle">Upload a Bulk RNA-seq count matrix (CSV, TSV, or Excel). Files must be fully numeric after the gene-id column.</p>
+                    <p class="panel-subtitle">Upload a Bulk RNA-seq count matrix (CSV, TSV, TXT, compressed gzip text, or Excel). Files must be fully numeric after the gene-id column.</p>
                 </div>
 
                 <div class="upload-zone" id="upload-zone">
@@ -124,11 +124,14 @@
                     <p>or click to browse</p>
                     <div class="upload-formats">
                         <span class="format-badge">.csv</span>
+                        <span class="format-badge">.csv.gz</span>
                         <span class="format-badge">.tsv</span>
+                        <span class="format-badge">.tsv.gz</span>
                         <span class="format-badge">.xlsx</span>
                         <span class="format-badge">.txt</span>
+                        <span class="format-badge">.txt.gz</span>
                     </div>
-                    <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xls" hidden>
+                    <input type="file" id="file-input" accept=".csv,.csv.gz,.tsv,.tsv.gz,.txt,.txt.gz,.xlsx" hidden>
                 </div>
 
                 <div class="upload-result hidden" id="upload-result">
