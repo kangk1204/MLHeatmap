@@ -107,6 +107,7 @@ def get_capabilities() -> dict[str, Any]:
         "exports": {
             "image_mode": "browser",
             "results_excel": True,
+            "results_excel_full": True,
             "server_image_exports": False,
             "formats": ["png", "svg"],
         },

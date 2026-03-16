@@ -61,6 +61,7 @@ def test_capabilities_endpoint_reports_core_runtime():
     assert data["gene_tables"]["mouse"] is True
     assert data["exports"]["image_mode"] == "browser"
     assert data["exports"]["results_excel"] is True
+    assert data["exports"]["results_excel_full"] is True
     assert data["models"]["rf"]["available"] is True
 
 
@@ -134,9 +135,11 @@ def test_browser_export_script_uses_client_side_plot_export():
     assert "_exportPlotlyElement" in export_js
     assert "_downloadServerHeatmap" in export_js
     assert "results_excel" in export_js
+    assert "results_excel_full" in export_js
     assert "optimal_combo_png" in export_js
     assert "optimal-auc-curve" in export_js
     assert 'data-type="optimal_combo_png"' in index_html
+    assert 'data-type="results_excel_full"' in index_html
 
 
 def test_groups_script_sorts_samples_by_name():
@@ -190,6 +193,21 @@ def test_excel_export_includes_metadata_sheet():
     metadata_rows = list(workbook["Metadata"].iter_rows(values_only=True))
     assert any(row[0] == "app.version" for row in metadata_rows if row and row[0])
     assert any(row[0] == "metadata.normalization.effect_size_basis" for row in metadata_rows if row and row[0])
+    assert "Normalized Expression" not in workbook.sheetnames
+
+
+def test_full_excel_export_includes_normalized_expression_sheet():
+    from openpyxl import load_workbook
+
+    client = _client()
+    session_id = _prepare_session(client)
+
+    response = client.get(f"/api/v1/export?session_id={session_id}&type=results_excel_full")
+
+    assert response.status_code == 200
+    workbook = load_workbook(BytesIO(response.content), read_only=True)
+    assert "Metadata" in workbook.sheetnames
+    assert "Normalized Expression" in workbook.sheetnames
 
 
 def test_optional_module_runtime_errors_do_not_break_capability_checks():

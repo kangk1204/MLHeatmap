@@ -766,6 +766,10 @@ class TestStaticFiles:
         r = client.get("/api/v1/export?session_id=not-a-uuid&type=results_excel")
         assert r.status_code == 400
 
+    def test_full_export_rejects_invalid_session_uuid(self, client):
+        r = client.get("/api/v1/export?session_id=not-a-uuid&type=results_excel_full")
+        assert r.status_code == 400
+
     def test_export_snapshot_is_isolated_from_live_session_mutation(self, client):
         from mlheatmap.api.export import _snapshot_export_session
 

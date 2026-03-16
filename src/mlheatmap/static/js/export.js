@@ -66,7 +66,7 @@ const Export = {
             return;
         }
 
-        if (type === 'results_excel') {
+        if (type === 'results_excel' || type === 'results_excel_full') {
             const dpi = document.getElementById('export-dpi').value;
             const url = API.exportUrl(App.state.sessionId, type, dpi);
             const anchor = document.createElement('a');
@@ -75,7 +75,8 @@ const Export = {
             document.body.appendChild(anchor);
             anchor.click();
             document.body.removeChild(anchor);
-            App.showToast('Downloading results workbook...', 'info');
+            const label = type === 'results_excel_full' ? 'full workbook' : 'compact workbook';
+            App.showToast(`Downloading ${label}...`, 'info');
         }
     },
 

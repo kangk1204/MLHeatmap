@@ -48,17 +48,24 @@ async def export_data(
 
     try:
         if export_type == "results_excel":
-            data = export_results_excel(_snapshot_export_session(session))
+            data = export_results_excel(_snapshot_export_session(session), include_normalized_expression=False)
             return Response(
                 data,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": "attachment; filename=mlheatmap_results.xlsx"},
+                headers={"Content-Disposition": "attachment; filename=mlheatmap_results_compact.xlsx"},
+            )
+        if export_type == "results_excel_full":
+            data = export_results_excel(_snapshot_export_session(session), include_normalized_expression=True)
+            return Response(
+                data,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": "attachment; filename=mlheatmap_results_full.xlsx"},
             )
         return JSONResponse(
             {
                 "error": (
                     f"Unsupported export type: {export_type}. "
-                    "Image exports are generated in the browser; use results_excel for workbook export."
+                    "Image exports are generated in the browser; use results_excel or results_excel_full for workbook export."
                 )
             },
             status_code=400,
