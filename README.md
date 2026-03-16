@@ -106,6 +106,42 @@ Automatic preprocessing:
 - All-zero genes are removed
 - Low-expression genes are filtered with the default rule: count `>= 10` in at least `max(2, 20% of samples)` samples
 
+## Public CRC CMS Example
+
+This repository does not bundle the manuscript matrices, but you can rebuild the CRC CMS example from public sources and analyze it in MLHeatmap.
+
+Download sources:
+
+- TCGA COAD STAR counts: [TCGA-COAD.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-COAD.star_counts.tsv.gz)
+- TCGA READ STAR counts: [TCGA-READ.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-READ.star_counts.tsv.gz)
+- Gene symbol probe map: [gencode.v36.annotation.gtf.gene.probemap](https://gdc.xenahubs.net/download/gencode.v36.annotation.gtf.gene.probemap)
+- TCGA COAD clinical matrix: [COAD_clinicalMatrix](https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.COAD.sampleMap%2FCOAD_clinicalMatrix)
+- TCGA READ clinical matrix: [READ_clinicalMatrix](https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.READ.sampleMap%2FREAD_clinicalMatrix)
+- CRCSC final CMS labels: [cms_labels_public_all.txt](https://raw.githubusercontent.com/Sage-Bionetworks/crc-cms-kras/master/020717/cms_labels_public_all.txt)
+
+Prepare an MLHeatmap-ready matrix:
+
+1. Merge the COAD and READ STAR count matrices on Ensembl gene IDs.
+2. Keep primary tumor samples only. For TCGA barcodes, this is sample type `01`.
+3. Reverse the Xena STAR representation from `log2(count + 1)` to integer counts with `round(2^x - 1)`.
+4. Map Ensembl gene IDs to gene symbols and keep one row per unique symbol.
+5. Match samples to the CRCSC `CMS_final_network_plus_RFclassifier_in_nonconsensus_samples` labels and exclude `NOLBL` cases.
+6. Save the final matrix with gene symbols in the first column and samples in the header. If you want one-click grouping in the UI, prefix sample names with the label, for example `CMS1__AA355201`.
+
+Analyze it in MLHeatmap:
+
+1. Start the app with `mlheatmap`.
+2. Upload the prepared matrix as `.tsv.gz` or `.csv.gz`.
+3. Use `Gene Mapping` with `Human` and the detected gene ID type.
+4. Normalize with `DESeq2-like VST` for the RNA-seq workflow used in the manuscript examples.
+5. In `Groups`, use `Auto-detect` if your sample names are prefixed as `CMS1__...`, or assign `CMS1`, `CMS2`, `CMS3`, and `CMS4` manually from your metadata file.
+6. Run `Biomarker` for the 4-class CMS analysis. `Random Forest`, `LightGBM`, or `XGBoost` are the main multiclass options.
+7. Run `DEG` separately as one-vs-rest comparisons such as `CMS1` vs `Rest`, because the DEG module supports exactly two groups at a time.
+
+Practical note:
+
+- The external GSE39582 validation cohort used in the manuscript is microarray data and is not a count matrix. Treat it as a separate cross-platform validation step rather than a direct upload target for the RNA-seq workflow above.
+
 ## Methodology And Limitations
 
 ### Normalization
