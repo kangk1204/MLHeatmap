@@ -144,6 +144,19 @@ def test_groups_script_sorts_samples_by_name():
     assert "this.allSamples = [...sampleNames].sort" in groups_js
 
 
+def test_heatmap_size_controls_support_direct_numeric_input():
+    project_root = Path(__file__).parents[1]
+    index_html = (project_root / "src" / "mlheatmap" / "static" / "index.html").read_text(encoding="utf-8")
+    heatmap_js = (project_root / "src" / "mlheatmap" / "static" / "js" / "heatmap.js").read_text(encoding="utf-8")
+
+    assert 'id="heatmap-width-input"' in index_html
+    assert 'id="heatmap-height-input"' in index_html
+    assert "const syncWidth = (rawValue" in heatmap_js
+    assert "const syncHeight = (rawValue" in heatmap_js
+    assert "widthInput.addEventListener('input'" in heatmap_js
+    assert "heightInput.addEventListener('input'" in heatmap_js
+
+
 def test_excel_export_includes_metadata_sheet():
     from openpyxl import load_workbook
 

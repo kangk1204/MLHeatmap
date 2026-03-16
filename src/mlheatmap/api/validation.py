@@ -55,7 +55,25 @@ def acquire_session_or_error(
     if session is None:
         return None, JSONResponse({"error": not_found_message}, status_code=404), normalized
 
-    return session, None, normalized
+    return session.session, None, normalized
+
+
+def acquire_session_lease_or_error(
+    request: Request,
+    session_id: str,
+    *,
+    not_found_message: str = "Session not found",
+):
+    """Return a validated session lease with an active-operation cancel token."""
+    normalized, error = validate_session_id_value(session_id)
+    if error is not None:
+        return None, error, None
+
+    lease = request.app.state.sessions.begin_use(normalized)
+    if lease is None:
+        return None, JSONResponse({"error": not_found_message}, status_code=404), normalized
+
+    return lease, None, normalized
 
 
 def sanitize_upload_filename(filename: str | None) -> str:

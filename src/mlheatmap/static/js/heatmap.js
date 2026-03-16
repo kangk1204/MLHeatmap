@@ -119,21 +119,52 @@ const Heatmap = {
         // Dynamic heatmap size controls
         const widthSlider = document.getElementById('heatmap-width-slider');
         const heightSlider = document.getElementById('heatmap-height-slider');
+        const widthInput = document.getElementById('heatmap-width-input');
+        const heightInput = document.getElementById('heatmap-height-input');
         const widthLabel = document.getElementById('heatmap-width-value');
         const heightLabel = document.getElementById('heatmap-height-value');
 
+        const syncWidth = (rawValue, { resize = true } = {}) => {
+            const parsed = Number.isFinite(rawValue) ? rawValue : parseInt(rawValue, 10);
+            const value = Math.max(0, Math.min(2400, Number.isFinite(parsed) ? parsed : 0));
+            if (widthSlider) widthSlider.value = value;
+            if (widthInput) widthInput.value = value;
+            if (widthLabel) widthLabel.textContent = value === 0 ? 'Auto' : `${value}px`;
+            if (resize) this._resizePlot();
+        };
+
+        const syncHeight = (rawValue, { resize = true } = {}) => {
+            const parsed = Number.isFinite(rawValue) ? rawValue : parseInt(rawValue, 10);
+            const value = Math.max(400, Math.min(3000, Number.isFinite(parsed) ? parsed : 800));
+            if (heightSlider) heightSlider.value = value;
+            if (heightInput) heightInput.value = value;
+            if (heightLabel) heightLabel.textContent = `${value}px`;
+            if (resize) this._resizePlot();
+        };
+
         if (widthSlider) {
             widthSlider.addEventListener('input', () => {
-                widthLabel.textContent = widthSlider.value === '0' ? 'Auto' : widthSlider.value + 'px';
-                this._resizePlot();
+                syncWidth(parseInt(widthSlider.value, 10));
             });
         }
         if (heightSlider) {
             heightSlider.addEventListener('input', () => {
-                heightLabel.textContent = heightSlider.value + 'px';
-                this._resizePlot();
+                syncHeight(parseInt(heightSlider.value, 10));
             });
         }
+        if (widthInput) {
+            widthInput.addEventListener('input', () => {
+                syncWidth(widthInput.value);
+            });
+        }
+        if (heightInput) {
+            heightInput.addEventListener('input', () => {
+                syncHeight(heightInput.value);
+            });
+        }
+
+        syncWidth(widthSlider ? parseInt(widthSlider.value, 10) : 0, { resize: false });
+        syncHeight(heightSlider ? parseInt(heightSlider.value, 10) : 800, { resize: false });
     },
 
     updateTopNMax(totalGenes) {

@@ -11,7 +11,8 @@ import numpy as np
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from mlheatmap.api.validation import acquire_session_or_error
+from mlheatmap.api.session import SessionCancelledError
+from mlheatmap.api.validation import acquire_session_lease_or_error
 from mlheatmap.core.capabilities import MODEL_SPECS, get_model_capability, normalize_model_name
 
 router = APIRouter(tags=["biomarker"])
@@ -25,6 +26,10 @@ def _stale_inputs_response():
         {"error": "Analysis inputs changed during computation. Rerun with the current settings."},
         status_code=409,
     )
+
+
+def _cancelled_response(message: str = "Analysis cancelled at user request."):
+    return JSONResponse({"error": message}, status_code=409)
 
 
 def _build_sample_groups_from_parts(
@@ -71,7 +76,7 @@ def _snapshot_biomarker_inputs(session) -> tuple[dict[str, Any] | None, JSONResp
 
         return {
             "analysis_revision": session.analysis_revision,
-            "expression": np.array(session.normalized, copy=True),
+            "expression": session.normalized,
             "gene_names": list(session.gene_names),
             "sample_groups": sample_groups,
         }, None
@@ -133,12 +138,10 @@ def _snapshot_deg_inputs(
 
         return {
             "analysis_revision": session.analysis_revision,
-            "expression": np.array(session.normalized, copy=True),
+            "expression": session.normalized,
             "gene_names": list(session.gene_names),
             "sample_groups": sample_groups,
-            "effect_size_data": (
-                None if session.deg_abundance is None else np.array(session.deg_abundance, copy=True)
-            ),
+            "effect_size_data": session.deg_abundance,
             "effect_size_basis": session.deg_effect_size_basis,
             "normalization_method": session.norm_method,
         }, None
@@ -192,32 +195,33 @@ async def biomarker_stream(
     panel_method: str = Query("forward"),
 ):
     """Run biomarker analysis with SSE progress streaming."""
-    session, error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if error is not None:
         return error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_biomarker_inputs(session)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     normalized_model = normalize_model_name(model)
     model_capability = get_model_capability(normalized_model)
     if not model_capability["known"]:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         valid_models = ", ".join(MODEL_SPECS.keys())
         return JSONResponse(
             {"error": f"Unknown model: {model}. Choose from: {valid_models}"},
             status_code=400,
         )
     if not model_capability["available"]:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return JSONResponse({"error": model_capability["unavailable_reason"]}, status_code=400)
 
     panel_method = (panel_method or "forward").strip().lower()
     valid_panels = {"forward", "lasso", "stability", "mrmr"}
     if panel_method not in valid_panels:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return JSONResponse(
             {"error": f"Unknown panel method: {panel_method}. Choose from: {', '.join(sorted(valid_panels))}"},
             status_code=400,
@@ -247,11 +251,15 @@ async def biomarker_stream(
                 model=normalized_model,
                 panel_method=panel_method,
                 progress_callback=progress_callback,
+                cancel_check=lease.cancel_event.is_set,
             ),
         )
 
         try:
             while not future.done():
+                if await request.is_disconnected():
+                    lease.cancel_event.set()
+                    return
                 try:
                     progress = await asyncio.wait_for(progress_queue.get(), timeout=0.3)
                     yield f"event: progress\ndata: {json.dumps(progress)}\n\n"
@@ -293,11 +301,13 @@ async def biomarker_stream(
                 }
 
             yield f"event: complete\ndata: {json.dumps(result, default=_json_safe)}\n\n"
+        except SessionCancelledError as exc:
+            yield f"event: app_error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
         except Exception as exc:
             traceback.print_exc()
             yield f"event: app_error\ndata: {json.dumps({'detail': str(exc)})}\n\n"
         finally:
-            request.app.state.sessions.end_use(normalized_session_id)
+            request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -313,18 +323,19 @@ async def deg_analysis(
     reference_group: str | None = Query(None),
 ):
     """Run DEG analysis between groups."""
-    session, error, normalized_session_id = acquire_session_or_error(request, session_id)
+    lease, error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
     if error is not None:
         return error
+    session = lease.session
 
     snapshot, snapshot_error = _snapshot_deg_inputs(session, reference_group=reference_group)
     if snapshot_error is not None:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
 
     valid_methods = ("wilcoxon", "ttest")
     if method not in valid_methods:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return JSONResponse(
             {"error": f"Unknown DEG method '{method}'. Use one of: {', '.join(valid_methods)}"},
             status_code=400,
@@ -344,6 +355,7 @@ async def deg_analysis(
             use_raw_pvalue=use_raw_pvalue,
             effect_size_data=snapshot["effect_size_data"],
             effect_size_basis=snapshot["effect_size_basis"],
+            cancel_check=lease.cancel_event.is_set,
         )
 
         with session.state_lock:
@@ -364,8 +376,10 @@ async def deg_analysis(
 
         response = _build_deg_response(result, snapshot["normalization_method"])
         return JSONResponse(response, headers={"Content-Type": "application/json"})
+    except SessionCancelledError as exc:
+        return _cancelled_response(str(exc))
     finally:
-        request.app.state.sessions.end_use(normalized_session_id)
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
 
 
 def _json_safe(obj):

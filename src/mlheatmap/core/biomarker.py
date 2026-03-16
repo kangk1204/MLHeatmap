@@ -8,6 +8,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
 
 from mlheatmap.core.capabilities import normalize_model_name
+from mlheatmap.core.cancellation import raise_if_cancelled
 
 
 def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100):
@@ -229,9 +230,11 @@ def _evaluate_prefix_auc_curve(
     n_estimators: int,
     needs_scaling: bool,
     n_classes: int,
+    cancel_check=None,
 ) -> list[dict[str, float | int | str]]:
     curve = []
     for k in range(1, len(ordered_idx) + 1):
+        raise_if_cancelled(cancel_check)
         subset = ordered_idx[:k]
         try:
             score = _compute_test_auc(
@@ -308,6 +311,7 @@ def _build_inner_auc_curve(
     n_estimators: int,
     needs_scaling: bool,
     n_splits: int,
+    cancel_check=None,
 ) -> tuple[list[dict[str, float | int | str]], int]:
     n_classes = len(np.unique(y))
     inner_cv = _make_inner_cv(y, n_splits)
@@ -316,6 +320,7 @@ def _build_inner_auc_curve(
     best_auc = -1.0
     best_n = 0
     for k in range(1, len(ordered_idx) + 1):
+        raise_if_cancelled(cancel_check)
         subset = ordered_idx[:k]
         try:
             mean_auc = _quick_cv_auc(
@@ -352,6 +357,7 @@ def _forward_order(
     needs_scaling: bool,
     n_splits: int,
     max_genes: int,
+    cancel_check=None,
 ) -> list[int]:
     n_classes = len(np.unique(y))
     inner_cv = _make_inner_cv(y, n_splits)
@@ -361,6 +367,7 @@ def _forward_order(
     ordered = []
     pool = list(candidate_idx[:max_genes])
     for _ in range(min(max_genes, len(pool))):
+        raise_if_cancelled(cancel_check)
         best_gene = None
         best_auc = -1.0
         for gene_idx in pool:
@@ -394,7 +401,9 @@ def _lasso_order(
     candidate_idx: list[int],
     *,
     max_genes: int,
+    cancel_check=None,
 ) -> list[int]:
+    raise_if_cancelled(cancel_check)
     from sklearn.linear_model import LogisticRegression
 
     X_cand = X_all[:, candidate_idx]
@@ -455,6 +464,7 @@ def _stability_order(
     candidate_idx: list[int],
     *,
     max_genes: int,
+    cancel_check=None,
 ) -> list[int]:
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import StratifiedShuffleSplit
@@ -466,6 +476,7 @@ def _stability_order(
     splitter = StratifiedShuffleSplit(n_splits=100, test_size=0.2, random_state=42)
 
     for seed, (train_idx, _) in enumerate(splitter.split(X_cand, y)):
+        raise_if_cancelled(cancel_check)
         X_sub = X_cand[train_idx]
         y_sub = y[train_idx]
         scaler = StandardScaler()
@@ -507,6 +518,7 @@ def _mrmr_order(
     candidate_idx: list[int],
     *,
     max_genes: int,
+    cancel_check=None,
 ) -> list[int]:
     from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
 
@@ -517,6 +529,7 @@ def _mrmr_order(
     remaining = set(range(n_cand))
 
     for _ in range(min(max_genes, n_cand)):
+        raise_if_cancelled(cancel_check)
         if not remaining:
             break
         if not selected_local:
@@ -557,15 +570,16 @@ def _panel_selection_order(
     needs_scaling: bool,
     n_splits: int,
     max_genes: int,
+    cancel_check=None,
 ) -> dict[str, object]:
     if panel_method == "lasso":
-        ordered_idx = _lasso_order(X_all, y, candidate_idx, max_genes=max_genes)
+        ordered_idx = _lasso_order(X_all, y, candidate_idx, max_genes=max_genes, cancel_check=cancel_check)
         method = "lasso"
     elif panel_method == "stability":
-        ordered_idx = _stability_order(X_all, y, candidate_idx, max_genes=max_genes)
+        ordered_idx = _stability_order(X_all, y, candidate_idx, max_genes=max_genes, cancel_check=cancel_check)
         method = "stability"
     elif panel_method == "mrmr":
-        ordered_idx = _mrmr_order(X_all, y, candidate_idx, max_genes=max_genes)
+        ordered_idx = _mrmr_order(X_all, y, candidate_idx, max_genes=max_genes, cancel_check=cancel_check)
         method = "mrmr"
     else:
         ordered_idx = _forward_order(
@@ -577,6 +591,7 @@ def _panel_selection_order(
             needs_scaling=needs_scaling,
             n_splits=n_splits,
             max_genes=max_genes,
+            cancel_check=cancel_check,
         )
         method = "forward"
 
@@ -589,6 +604,7 @@ def _panel_selection_order(
         n_estimators=n_estimators,
         needs_scaling=needs_scaling,
         n_splits=n_splits,
+        cancel_check=cancel_check,
     )
     return {
         "ordered_idx": ordered_idx,
@@ -698,8 +714,10 @@ def run_biomarker_analysis(
     model: str = "rf",
     panel_method: str = "forward",
     progress_callback=None,
+    cancel_check=None,
 ) -> dict:
     """Full biomarker discovery pipeline with reviewer-safe nested CV."""
+    raise_if_cancelled(cancel_check)
 
     def _progress(step, pct, msg):
         if progress_callback:
@@ -758,6 +776,7 @@ def run_biomarker_analysis(
     _progress("training", 15, f"Starting nested CV ({n_splits} folds) with {model_display}")
 
     for fold_i, (train_idx, test_idx) in enumerate(outer_cv.split(X_all, y)):
+        raise_if_cancelled(cancel_check)
         pct = 15 + int(fold_i / n_splits * 50)
         _progress("training", pct, f"CV fold {fold_i + 1}/{n_splits}")
 
@@ -860,6 +879,7 @@ def run_biomarker_analysis(
                 needs_scaling=needs_scaling,
                 n_splits=n_splits,
                 max_genes=max_panel_genes,
+                cancel_check=cancel_check,
             )
             ordered_idx = list(panel_result["ordered_idx"])
             if ordered_idx:
@@ -874,6 +894,7 @@ def run_biomarker_analysis(
                     n_estimators=n_estimators,
                     needs_scaling=needs_scaling,
                     n_classes=n_classes,
+                    cancel_check=cancel_check,
                 )
                 panel_orders.append(panel_result)
                 selection_curves.append(list(panel_result["inner_auc_curve"]))
