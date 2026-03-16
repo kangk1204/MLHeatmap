@@ -19,6 +19,9 @@ const Export = {
 
         const aucCard = document.querySelector('.export-card[data-type="auc_png"]');
         if (aucCard) aucCard.style.display = hasMl ? '' : 'none';
+
+        const optimalCard = document.querySelector('.export-card[data-type="optimal_combo_png"]');
+        if (optimalCard) optimalCard.style.display = hasMl ? '' : 'none';
     },
 
     download(type) {
@@ -28,7 +31,7 @@ const Export = {
         }
 
         const needsDeg = type.startsWith('volcano_');
-        const needsMl = type.startsWith('shap_') || type.startsWith('auc_');
+        const needsMl = type.startsWith('shap_') || type.startsWith('auc_') || type.startsWith('optimal_combo_');
         if (needsDeg && !App.state.degResults) {
             App.showToast('Run DEG analysis first', 'error');
             return;
@@ -50,6 +53,11 @@ const Export = {
 
         if (type === 'auc_png' || type === 'auc_svg') {
             this._exportPlotlyElement('auc-plot', type, 'roc_curve');
+            return;
+        }
+
+        if (type === 'optimal_combo_png' || type === 'optimal_combo_svg') {
+            this._exportPlotlyElement('optimal-auc-curve', type, 'optimal_gene_combination_curve');
             return;
         }
 

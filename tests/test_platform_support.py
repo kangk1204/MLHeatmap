@@ -124,14 +124,19 @@ def test_heatmap_server_render_returns_png_bytes():
 
 
 def test_browser_export_script_uses_client_side_plot_export():
-    export_js = (Path(__file__).parents[1] / "src" / "mlheatmap" / "static" / "js" / "export.js").read_text(
+    project_root = Path(__file__).parents[1]
+    export_js = (project_root / "src" / "mlheatmap" / "static" / "js" / "export.js").read_text(
         encoding="utf-8"
     )
+    index_html = (project_root / "src" / "mlheatmap" / "static" / "index.html").read_text(encoding="utf-8")
 
     assert "Plotly.downloadImage" in export_js
     assert "_exportPlotlyElement" in export_js
     assert "_downloadServerHeatmap" in export_js
     assert "results_excel" in export_js
+    assert "optimal_combo_png" in export_js
+    assert "optimal-auc-curve" in export_js
+    assert 'data-type="optimal_combo_png"' in index_html
 
 
 def test_groups_script_sorts_samples_by_name():
