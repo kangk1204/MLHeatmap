@@ -76,6 +76,10 @@ const App = {
             Groups.populate(this.state.sampleNames);
         }
 
+        if (panelId === 'heatmap' && typeof Heatmap !== 'undefined' && typeof Heatmap.autoRenderIfNeeded === 'function') {
+            requestAnimationFrame(() => Heatmap.autoRenderIfNeeded());
+        }
+
         // Refresh export card visibility when entering export panel
         if (panelId === 'export' && typeof Export !== 'undefined') {
             Export.refresh();

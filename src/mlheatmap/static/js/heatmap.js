@@ -223,6 +223,28 @@ const Heatmap = {
         });
     },
 
+    _hasRenderedOutput() {
+        const plotEl = document.getElementById('heatmap-plot');
+        if (!plotEl) return false;
+        if (document.getElementById('server-heatmap-viewer')) return true;
+        return Boolean((plotEl.data && plotEl.data.length > 0) || plotEl.childElementCount > 0);
+    },
+
+    autoRenderIfNeeded() {
+        if (this._pendingRequest || this._hasRenderedOutput()) return;
+        if (!App.state.sessionId || !App.completedSteps.has('normalize')) return;
+
+        if (this._isDegMode && App.state.degResults) {
+            this.renderDegHeatmap();
+            return;
+        }
+        if (this._isShapMode && App.state.biomarkerResults) {
+            this.renderShapHeatmap();
+            return;
+        }
+        this.render();
+    },
+
     async render() {
         if (!App.state.sessionId) return App.showToast('No data loaded', 'error');
         this._isShapMode = false;
