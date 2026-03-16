@@ -68,6 +68,12 @@ Windows equivalent:
 run-windows.cmd --no-browser
 ```
 
+Runtime notes:
+
+- The local app server keeps running until you stop the process yourself. Session cleanup does not shut down the server.
+- You cannot run two MLHeatmap instances on the same host and port at the same time. The second process will fail with an address-in-use error.
+- To run multiple local instances, start the second one on a different port such as `mlheatmap --port 8766 --no-browser`.
+
 ### Docker
 
 Docker is the recommended path when you need the optional `xgboost` and `lightgbm` models:
