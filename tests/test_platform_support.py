@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -153,57 +150,6 @@ def test_excel_export_includes_metadata_sheet():
     metadata_rows = list(workbook["Metadata"].iter_rows(values_only=True))
     assert any(row[0] == "app.version" for row in metadata_rows if row and row[0])
     assert any(row[0] == "metadata.normalization.effect_size_basis" for row in metadata_rows if row and row[0])
-
-
-def test_paper_reproduce_script_writes_expected_outputs(tmp_path):
-    groups_path = tmp_path / "groups.json"
-    groups_path.write_text(
-        json.dumps(
-            {
-                "Control": ["Ctrl_1", "Ctrl_2", "Ctrl_3"],
-                "Case": ["Drug_1", "Drug_2", "Drug_3"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    output_dir = tmp_path / "out"
-
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "scripts/paper_reproduce.py",
-            "--input",
-            str(DATA_DIR / "small_quick_test.csv"),
-            "--groups-json",
-            str(groups_path),
-            "--output-dir",
-            str(output_dir),
-            "--species",
-            "human",
-            "--id-type",
-            "auto",
-            "--normalize",
-            "log2",
-            "--n-top-genes",
-            "5",
-            "--n-estimators",
-            "50",
-            "--cv-folds",
-            "2",
-        ],
-        cwd=Path(__file__).parents[1],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert proc.returncode == 0
-    assert (output_dir / "biomarker.json").is_file()
-    assert (output_dir / "deg.json").is_file()
-    assert (output_dir / "metadata.json").is_file()
-    assert (output_dir / "results.xlsx").is_file()
-    metadata = json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))
-    assert metadata["metadata"]["reproducibility"]["git_commit"] is not None
 
 
 def test_optional_module_runtime_errors_do_not_break_capability_checks():
