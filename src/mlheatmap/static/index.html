@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <link rel="stylesheet" href="/static/css/main.css?v=35">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧬</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>?㎚</text></svg>">
 </head>
 <body>
     <div class="app">
@@ -44,15 +44,15 @@
                         <span class="step-title">Upload</span>
                         <span class="step-desc">Count matrix</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="mapping" id="nav-mapping">
                     <div class="step-number">2</div>
                     <div class="step-info">
                         <span class="step-title">Gene Mapping</span>
-                        <span class="step-desc">ID → Symbol</span>
+                        <span class="step-desc">ID ??Symbol</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="normalize" id="nav-normalize">
                     <div class="step-number">3</div>
@@ -60,7 +60,7 @@
                         <span class="step-title">Normalize</span>
                         <span class="step-desc">Transform data</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="groups" id="nav-groups">
                     <div class="step-number">4</div>
@@ -68,7 +68,7 @@
                         <span class="step-title">Groups</span>
                         <span class="step-desc">Assign samples</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="biomarker" id="nav-biomarker">
                     <div class="step-number">5</div>
@@ -76,7 +76,7 @@
                         <span class="step-title">Biomarker</span>
                         <span class="step-desc">SHAP analysis</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="heatmap" id="nav-heatmap">
                     <div class="step-number">6</div>
@@ -84,7 +84,7 @@
                         <span class="step-title">Heatmap</span>
                         <span class="step-desc">Visualize</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
                 <button class="nav-step" data-panel="export" id="nav-export">
                     <div class="step-number">7</div>
@@ -92,13 +92,13 @@
                         <span class="step-title">Export</span>
                         <span class="step-desc">Save results</span>
                     </div>
-                    <div class="step-check">✓</div>
+                    <div class="step-check">??/div>
                 </button>
             </div>
 
             <div class="sidebar-footer">
       <a href="https://github.com/kangk1204/MLHeatmap" target="_blank" rel="noopener noreferrer" class="sidebar-link">GitHub</a>
-                <span class="sidebar-divider">·</span>
+                <span class="sidebar-divider">쨌</span>
                 <span class="sidebar-link" id="help-btn">Help</span>
             </div>
         </nav>
@@ -149,7 +149,7 @@
                         <p class="filter-desc">Genes with count &lt; <strong id="filter-min-count">10</strong> in fewer than <strong id="filter-min-samples">20%</strong> of samples were removed for memory efficiency and faster analysis.</p>
                         <div class="filter-stats">
                             <span class="filter-stat"><span class="filter-stat-value" id="filter-before">0</span> total genes</span>
-                            <span class="filter-arrow">→</span>
+                            <span class="filter-arrow">??/span>
                             <span class="filter-stat"><span class="filter-stat-value filter-green" id="filter-after">0</span> kept</span>
                             <span class="filter-stat"><span class="filter-stat-value filter-red" id="filter-removed">0</span> removed</span>
                         </div>
@@ -235,18 +235,18 @@
 
                 <div class="method-cards">
                     <div class="method-card glass-card selected" data-method="deseq2">
-                        <div class="method-icon">📊</div>
+                        <div class="method-icon">?뱤</div>
                         <h3>DESeq2-like VST</h3>
                         <p>Median-of-ratios normalization with a VST-style transform. This is a normalization method, not the DESeq2 differential test itself.</p>
                         <span class="method-badge">Recommended</span>
                     </div>
                     <div class="method-card glass-card" data-method="tpm">
-                        <div class="method-icon">📈</div>
+                        <div class="method-icon">?뱢</div>
                         <h3>CPM + Log2</h3>
                         <p>Counts per million with log2 transform. Good for comparing expression levels across samples.</p>
                     </div>
                     <div class="method-card glass-card" data-method="log2">
-                        <div class="method-icon">📉</div>
+                        <div class="method-icon">?뱣</div>
                         <h3>Log2(count+1)</h3>
                         <p>Simple log2 transform. Fast and suitable for quick exploration.</p>
                     </div>
@@ -368,15 +368,15 @@
                         </select>
                     </div>
                     <div class="control-group">
-                        <label>Top Genes <span class="param-range">(5–200)</span></label>
+                        <label>Top Genes <span class="param-range">(5??00)</span></label>
                         <input type="number" id="n-top-genes" class="number-input" value="20" min="5" max="200">
                     </div>
                     <div class="control-group" id="estimators-group">
-                        <label id="estimators-label">Trees <span class="param-range">(50–2000)</span></label>
+                        <label id="estimators-label">Trees <span class="param-range">(50??000)</span></label>
                         <input type="number" id="n-estimators" class="number-input" value="500" min="50" max="2000" step="50">
                     </div>
                     <div class="control-group">
-                        <label>CV Folds <span class="param-range">(2–10)</span></label>
+                        <label>CV Folds <span class="param-range">(2??0)</span></label>
                         <input type="number" id="cv-folds" class="number-input" value="5" min="2" max="10">
                     </div>
                     <button class="btn btn-primary btn-glow" id="btn-run-biomarker">
@@ -611,7 +611,7 @@
 
                 <div class="export-grid">
                     <div class="export-card glass-card" data-type="heatmap_png">
-                        <div class="export-icon">🗺️</div>
+                        <div class="export-icon">?뿺截?/div>
                         <h3>Heatmap</h3>
                         <p>Clustered heatmap image</p>
                         <div class="export-formats">
@@ -620,7 +620,7 @@
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="volcano_png">
-                        <div class="export-icon">🌋</div>
+                        <div class="export-icon">?뙅</div>
                         <h3>Volcano Plot</h3>
                         <p>DEG significance plot</p>
                         <div class="export-formats">
@@ -629,7 +629,7 @@
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="shap_png">
-                        <div class="export-icon">🎯</div>
+                        <div class="export-icon">?렞</div>
                         <h3>SHAP Plot</h3>
                         <p>Feature importance chart</p>
                         <div class="export-formats">
@@ -638,7 +638,7 @@
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="auc_png">
-                        <div class="export-icon">📈</div>
+                        <div class="export-icon">?뱢</div>
                         <h3>ROC Curve</h3>
                         <p>AUC performance plot</p>
                         <div class="export-formats">
@@ -647,7 +647,7 @@
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="optimal_combo_png">
-                        <div class="export-icon">?돽</div>
+                        <div class="export-icon">🧬</div>
                         <h3>Optimal Panel Curve</h3>
                         <p>Panel AUC versus gene count</p>
                         <div class="export-formats">
@@ -656,7 +656,7 @@
                         </div>
                     </div>
                     <div class="export-card glass-card" data-type="results_excel">
-                        <div class="export-icon">📋</div>
+                        <div class="export-icon">?뱥</div>
                         <h3>Excel Report</h3>
                         <p>All results in spreadsheet</p>
                         <div class="export-formats">
