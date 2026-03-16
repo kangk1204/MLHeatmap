@@ -8,6 +8,7 @@ const Groups = {
     selectedSamples: new Set(),
     lastClickedIdx: -1,  // for shift-click range select
     allSamples: [],       // ordered list of all sample names
+    _sampleCollator: new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }),
 
     init() {
         document.getElementById('btn-add-group').addEventListener('click', () => this.addGroup());
@@ -50,7 +51,7 @@ const Groups = {
     },
 
     populate(sampleNames) {
-        this.allSamples = [...sampleNames];
+        this.allSamples = [...sampleNames].sort((a, b) => this.compareSampleNames(a, b));
         this.selectedSamples.clear();
         this.lastClickedIdx = -1;
 
@@ -70,7 +71,7 @@ const Groups = {
             });
         });
 
-        sampleNames.forEach((name, i) => {
+        this.allSamples.forEach((name, i) => {
             if (!assigned.has(name)) {
                 const chip = this.createChip(name, true, i);
                 if (excluded.has(name)) chip.classList.add('excluded');
@@ -104,6 +105,23 @@ const Groups = {
         // Clear search
         const searchInput = document.getElementById('sample-search');
         if (searchInput) searchInput.value = '';
+    },
+
+    compareSampleNames(a, b) {
+        return this._sampleCollator.compare(a, b);
+    },
+
+    appendSortedChip(container, chip) {
+        const sampleName = chip.dataset.sample || '';
+        const siblings = [...container.querySelectorAll('.sample-chip')];
+        const insertBefore = siblings.find(existing =>
+            this.compareSampleNames(sampleName, existing.dataset.sample || '') < 0
+        );
+        if (insertBefore) {
+            container.insertBefore(chip, insertBefore);
+        } else {
+            container.appendChild(chip);
+        }
     },
 
     createChip(name, showRemove = false, poolIdx = -1) {
@@ -300,7 +318,7 @@ const Groups = {
             chips.forEach(c => {
                 const sName = c.dataset.sample;
                 const origIdx = this.allSamples.indexOf(sName);
-                pool.appendChild(this.createChip(sName, true, origIdx >= 0 ? origIdx : 0));
+                this.appendSortedChip(pool, this.createChip(sName, true, origIdx >= 0 ? origIdx : 0));
             });
             col.remove();
             this.updatePoolCount();
@@ -332,7 +350,7 @@ const Groups = {
         // Add to group
         const dropzone = document.querySelector(`.group-dropzone[data-group-idx="${groupIdx}"]`);
         if (dropzone) {
-            dropzone.appendChild(this.createChip(sampleName, true));
+            this.appendSortedChip(dropzone, this.createChip(sampleName, true));
         }
         this.updatePoolCount();
         this.updateGroupCounts();
@@ -398,21 +416,25 @@ const Groups = {
         });
 
         const groups = Object.entries(prefixes);
-        if (groups.length >= 2 && groups.length <= 10) {
-            // Clear existing
-            document.getElementById('groups-area').innerHTML = '';
-            this.groupCount = 0;
-            document.getElementById('sample-pool').innerHTML = '';
-            this.selectedSamples.clear();
+            if (groups.length >= 2 && groups.length <= 10) {
+                // Clear existing
+                document.getElementById('groups-area').innerHTML = '';
+                this.groupCount = 0;
+                document.getElementById('sample-pool').innerHTML = '';
+                this.selectedSamples.clear();
 
-            groups.forEach(([prefix, members]) => {
-                this.addGroup(prefix, { markDirty: false });
-                const idx = this.groupCount - 1;
-                members.forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
-            });
+                groups
+                    .sort(([a], [b]) => this.compareSampleNames(a, b))
+                    .forEach(([prefix, members]) => {
+                    this.addGroup(prefix, { markDirty: false });
+                    const idx = this.groupCount - 1;
+                    members
+                        .sort((a, b) => this.compareSampleNames(a, b))
+                        .forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
+                    });
 
-            this.markDirty();
-            App.showToast(`Auto-detected ${groups.length} groups`, 'success');
+                this.markDirty();
+                App.showToast(`Auto-detected ${groups.length} groups`, 'success');
         } else {
             App.showToast('Could not auto-detect groups. Please assign manually.', 'info');
             this.populate(samples);
@@ -454,11 +476,15 @@ const Groups = {
                 document.getElementById('sample-pool').innerHTML = '';
                 this.selectedSamples.clear();
 
-                groups.forEach(([prefix, members]) => {
+                groups
+                    .sort(([a], [b]) => this.compareSampleNames(a, b))
+                    .forEach(([prefix, members]) => {
                     this.addGroup(prefix, { markDirty: false });
                     const idx = this.groupCount - 1;
-                    members.forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
-                });
+                    members
+                        .sort((a, b) => this.compareSampleNames(a, b))
+                        .forEach(s => this.moveSampleToGroup(s, idx, { markDirty: false }));
+                    });
 
                 this.markDirty();
                 App.showToast(`Regex grouped ${matched} samples into ${groups.length} groups`, 'success');
