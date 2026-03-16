@@ -7,6 +7,8 @@ between two or more groups.
 import numpy as np
 from scipy import stats
 
+from mlheatmap.core.cancellation import raise_if_cancelled
+
 MIN_POSITIVE_PVALUE = float(np.nextafter(0.0, 1.0))
 
 
@@ -20,6 +22,7 @@ def compute_deg(
     use_raw_pvalue: bool = False,
     effect_size_data: np.ndarray = None,
     effect_size_basis: str = "",
+    cancel_check=None,
 ) -> dict:
     """Run DEG analysis between groups.
 
@@ -67,6 +70,8 @@ def compute_deg(
     results = []
 
     for i in range(n_genes):
+        if i % 128 == 0:
+            raise_if_cancelled(cancel_check)
         expr_g1 = expression[i, idx_g1]
         expr_g2 = expression[i, idx_g2]
 
@@ -124,6 +129,7 @@ def compute_deg(
         )
 
     # Multiple testing correction (Benjamini-Hochberg)
+    raise_if_cancelled(cancel_check)
     pvals = np.array([r["pvalue"] for r in results])
     adj_pvals = _benjamini_hochberg(pvals)
 

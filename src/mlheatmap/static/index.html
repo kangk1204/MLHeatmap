@@ -576,12 +576,18 @@
                 <div class="heatmap-size-controls glass-card">
                     <div class="control-group">
                         <label>Width</label>
-                        <input type="range" id="heatmap-width-slider" min="0" max="2400" value="0" step="50">
+                        <div class="size-control-row">
+                            <input type="range" id="heatmap-width-slider" min="0" max="2400" value="0" step="50">
+                            <input type="number" id="heatmap-width-input" class="number-input heatmap-size-input" value="0" min="0" max="2400" step="50">
+                        </div>
                         <span id="heatmap-width-value">Auto</span>
                     </div>
                     <div class="control-group">
                         <label>Height</label>
-                        <input type="range" id="heatmap-height-slider" min="400" max="3000" value="800" step="50">
+                        <div class="size-control-row">
+                            <input type="range" id="heatmap-height-slider" min="400" max="3000" value="800" step="50">
+                            <input type="number" id="heatmap-height-input" class="number-input heatmap-size-input" value="800" min="400" max="3000" step="50">
+                        </div>
                         <span id="heatmap-height-value">800px</span>
                     </div>
                 </div>

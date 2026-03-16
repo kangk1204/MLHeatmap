@@ -1120,6 +1120,22 @@ tbody tr:hover {
     flex: none;
 }
 
+.size-control-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.size-control-row input[type="range"] {
+    flex: 1;
+}
+
+.heatmap-size-input {
+    width: 96px;
+    flex: none;
+}
+
 .heatmap-container {
     margin-bottom: 20px;
     padding: 8px;

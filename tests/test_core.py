@@ -263,15 +263,16 @@ class TestSession:
 
         store = SessionStore(ttl_hours=0)
         session = store.create()
-        leased = store.begin_use(session.id)
-        assert leased is session
+        lease = store.begin_use(session.id)
+        assert lease is not None
+        assert lease.session is session
 
         with session.state_lock:
             session.last_accessed_at = time.time() - 60
         store._cleanup()
         assert store.get(session.id) is session
 
-        store.end_use(session.id)
+        store.end_use(session.id, lease.operation_id)
         with session.state_lock:
             session.last_accessed_at = time.time() - 60
         store._cleanup()
