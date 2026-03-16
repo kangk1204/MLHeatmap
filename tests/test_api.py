@@ -388,6 +388,18 @@ class TestHeatmap:
         assert r.status_code == 400
         assert "No samples remain after exclusion" in r.json()["error"]
 
+    def test_heatmap_request_releases_session_cancel_token(self, client):
+        sid, _, _ = _prepare_deg_session(client)
+
+        r = client.get(f"/api/v1/heatmap?session_id={sid}&top_n=20")
+        assert r.status_code == 200
+
+        session = client.app.state.sessions.get(sid)
+        assert session is not None
+        with session.state_lock:
+            assert session.active_operations == 0
+            assert len(session._operation_cancel_events) == 0
+
 
 class TestDEG:
     def test_deg_reference_group_reorders_labels(self, client):
@@ -469,6 +481,20 @@ class TestDEG:
 
 
 class TestReentryAndConcurrency:
+    def test_session_cancel_endpoint_sets_active_cancel_event(self, client):
+        session = client.app.state.sessions.create()
+        lease = client.app.state.sessions.begin_use(session.id)
+        assert lease is not None
+
+        try:
+            r = client.post("/api/v1/session/cancel", json={"session_id": session.id})
+            assert r.status_code == 200
+            payload = r.json()
+            assert payload["cancelled_operations"] >= 1
+            assert lease.cancel_event.is_set() is True
+        finally:
+            client.app.state.sessions.end_use(session.id, lease.operation_id)
+
     def test_group_change_invalidates_existing_ml_and_deg_results(self, client):
         sid, samples, _ = _prepare_deg_session(client)
 

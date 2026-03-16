@@ -157,6 +157,18 @@ def test_heatmap_size_controls_support_direct_numeric_input():
     assert "heightInput.addEventListener('input'" in heatmap_js
 
 
+def test_app_exposes_session_cancel_endpoint_and_frontend_abort_wiring():
+    project_root = Path(__file__).parents[1]
+    api_js = (project_root / "src" / "mlheatmap" / "static" / "js" / "api.js").read_text(encoding="utf-8")
+    heatmap_js = (project_root / "src" / "mlheatmap" / "static" / "js" / "heatmap.js").read_text(encoding="utf-8")
+    biomarker_js = (project_root / "src" / "mlheatmap" / "static" / "js" / "biomarker.js").read_text(encoding="utf-8")
+
+    assert "/session/cancel" in api_js
+    assert "new AbortController()" in heatmap_js
+    assert "API.cancelSession(App.state.sessionId)" in heatmap_js
+    assert "API.cancelSession(App.state.sessionId)" in biomarker_js
+
+
 def test_excel_export_includes_metadata_sheet():
     from openpyxl import load_workbook
 

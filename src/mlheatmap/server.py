@@ -80,9 +80,19 @@ def create_app() -> FastAPI:
     app.state.sessions = SessionStore()
 
     # API routers
-    from mlheatmap.api import biomarker, capabilities, export, gene_mapping, groups, heatmap, normalize, upload
+    from mlheatmap.api import (
+        biomarker,
+        capabilities,
+        export,
+        gene_mapping,
+        groups,
+        heatmap,
+        normalize,
+        session_routes,
+        upload,
+    )
 
-    for router_module in [capabilities, upload, gene_mapping, normalize, heatmap, groups, biomarker, export]:
+    for router_module in [capabilities, upload, gene_mapping, normalize, heatmap, groups, biomarker, export, session_routes]:
         app.include_router(router_module.router, prefix="/api/v1")
 
     # Static files
