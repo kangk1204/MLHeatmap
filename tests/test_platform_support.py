@@ -134,6 +134,16 @@ def test_browser_export_script_uses_client_side_plot_export():
     assert "results_excel" in export_js
 
 
+def test_groups_script_sorts_samples_by_name():
+    groups_js = (Path(__file__).parents[1] / "src" / "mlheatmap" / "static" / "js" / "groups.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Intl.Collator" in groups_js
+    assert "appendSortedChip" in groups_js
+    assert "this.allSamples = [...sampleNames].sort" in groups_js
+
+
 def test_excel_export_includes_metadata_sheet():
     from openpyxl import load_workbook
 
