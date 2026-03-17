@@ -18,6 +18,7 @@ env/
 
 # Analysis outputs / local manuscript artifacts
 analysis/
+generated/
 
 # IDE
 .vscode/
