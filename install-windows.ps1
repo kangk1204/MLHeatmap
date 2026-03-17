@@ -143,7 +143,12 @@ function Get-CompatiblePython {
         (Join-Path $env:LocalAppData "Programs\Python\Python312\python.exe"),
         (Join-Path $env:LocalAppData "Programs\Python\Python311\python.exe"),
         (Join-Path $env:ProgramFiles "Python312\python.exe"),
-        (Join-Path $env:ProgramFiles "Python311\python.exe")
+        (Join-Path $env:ProgramFiles "Python311\python.exe"),
+        (Join-Path $env:USERPROFILE "miniforge3\python.exe"),
+        (Join-Path $env:USERPROFILE "miniconda3\python.exe"),
+        (Join-Path $env:USERPROFILE "anaconda3\python.exe"),
+        (Join-Path $env:LocalAppData "miniforge3\python.exe"),
+        (Join-Path $env:LocalAppData "miniconda3\python.exe")
     )
 
     foreach ($path in $standardPaths) {

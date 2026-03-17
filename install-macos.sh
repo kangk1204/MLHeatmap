@@ -26,10 +26,18 @@ select_python() {
     /opt/homebrew/bin/python3.12 \
     /opt/homebrew/opt/python@3.12/bin/python3.12 \
     /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 \
+    /opt/homebrew/Caskroom/miniforge/base/bin/python3.12 \
+    "$HOME/miniforge3/bin/python3.12" \
+    "$HOME/miniconda3/bin/python3.12" \
+    "$HOME/anaconda3/bin/python3.12" \
     python3.12 \
     /opt/homebrew/bin/python3.11 \
     /opt/homebrew/opt/python@3.11/bin/python3.11 \
     /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 \
+    /opt/homebrew/Caskroom/miniforge/base/bin/python3.11 \
+    "$HOME/miniforge3/bin/python3.11" \
+    "$HOME/miniconda3/bin/python3.11" \
+    "$HOME/anaconda3/bin/python3.11" \
     python3.11 \
     python3; do
     if command -v "$candidate" >/dev/null 2>&1; then
