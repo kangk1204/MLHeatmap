@@ -58,11 +58,19 @@ Validation note:
 
 After installation, restart with:
 
+macOS Apple Silicon:
+
+```bash
+bash ./run-macos.sh
+```
+
+Ubuntu:
+
 ```bash
 bash ./run-ubuntu.sh --no-browser
 ```
 
-Windows equivalent:
+Windows:
 
 ```bat
 run-windows.cmd --no-browser
