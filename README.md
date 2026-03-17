@@ -4,6 +4,13 @@ Interactive RNA-seq heatmap and biomarker discovery tool for bulk count matrices
 
 ## Quickstart
 
+### Get the repository
+
+```bash
+git clone https://github.com/kangk1204/MLHeatmap.git
+cd MLHeatmap
+```
+
 ### Native install
 
 From a local clone of this repository:
