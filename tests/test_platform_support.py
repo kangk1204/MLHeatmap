@@ -163,6 +163,9 @@ def test_heatmap_size_controls_support_direct_numeric_input():
     assert "const syncHeight = (rawValue" in heatmap_js
     assert "widthInput.addEventListener('input'" in heatmap_js
     assert "heightInput.addEventListener('input'" in heatmap_js
+    assert "widthInput.addEventListener('change'" in heatmap_js
+    assert "heightInput.addEventListener('blur'" in heatmap_js
+    assert "_scheduleResizePlot()" in heatmap_js
 
 
 def test_app_exposes_session_cancel_endpoint_and_frontend_abort_wiring():

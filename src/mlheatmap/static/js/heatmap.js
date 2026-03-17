@@ -6,6 +6,7 @@ const Heatmap = {
     _pendingRequest: false,
     _abortController: null,
     _serverImageUrl: null,  // Track blob URL for cleanup
+    _resizeRaf: null,
     _maxGenes: 60000,  // Updated after normalization
     _activeMax: 60000, // Current mode's effective max (changes per mode)
     SERVER_RENDER_THRESHOLD: 5000,
@@ -51,6 +52,16 @@ const Heatmap = {
         if (this._abortController) this._abortController.abort();
         this._abortController = new AbortController();
         return this._abortController;
+    },
+
+    _scheduleResizePlot() {
+        if (this._resizeRaf) {
+            cancelAnimationFrame(this._resizeRaf);
+        }
+        this._resizeRaf = requestAnimationFrame(() => {
+            this._resizeRaf = null;
+            this._resizePlot();
+        });
     },
 
     /** Consolidate dendrogram branches into a single trace using null separators. */
@@ -138,22 +149,49 @@ const Heatmap = {
         const widthLabel = document.getElementById('heatmap-width-value');
         const heightLabel = document.getElementById('heatmap-height-value');
 
-        const syncWidth = (rawValue, { resize = true } = {}) => {
+        const syncWidth = (rawValue, { resize = true, writeInput = true } = {}) => {
             const parsed = Number.isFinite(rawValue) ? rawValue : parseInt(rawValue, 10);
             const value = Math.max(0, Math.min(2400, Number.isFinite(parsed) ? parsed : 0));
             if (widthSlider) widthSlider.value = value;
-            if (widthInput) widthInput.value = value;
+            if (widthInput && writeInput) widthInput.value = value;
             if (widthLabel) widthLabel.textContent = value === 0 ? 'Auto' : `${value}px`;
-            if (resize) this._resizePlot();
+            if (resize) this._scheduleResizePlot();
         };
 
-        const syncHeight = (rawValue, { resize = true } = {}) => {
+        const syncHeight = (rawValue, { resize = true, writeInput = true } = {}) => {
             const parsed = Number.isFinite(rawValue) ? rawValue : parseInt(rawValue, 10);
             const value = Math.max(400, Math.min(3000, Number.isFinite(parsed) ? parsed : 800));
             if (heightSlider) heightSlider.value = value;
-            if (heightInput) heightInput.value = value;
+            if (heightInput && writeInput) heightInput.value = value;
             if (heightLabel) heightLabel.textContent = `${value}px`;
-            if (resize) this._resizePlot();
+            if (resize) this._scheduleResizePlot();
+        };
+
+        const previewWidthInput = () => {
+            if (!widthInput) return;
+            if (widthInput.value === '') {
+                if (widthLabel) widthLabel.textContent = 'Auto';
+                return;
+            }
+            syncWidth(widthInput.value, { resize: false, writeInput: false });
+        };
+
+        const previewHeightInput = () => {
+            if (!heightInput) return;
+            if (heightInput.value === '') {
+                return;
+            }
+            syncHeight(heightInput.value, { resize: false, writeInput: false });
+        };
+
+        const commitWidthInput = () => {
+            if (!widthInput) return;
+            syncWidth(widthInput.value, { resize: true, writeInput: true });
+        };
+
+        const commitHeightInput = () => {
+            if (!heightInput) return;
+            syncHeight(heightInput.value, { resize: true, writeInput: true });
         };
 
         if (widthSlider) {
@@ -168,12 +206,22 @@ const Heatmap = {
         }
         if (widthInput) {
             widthInput.addEventListener('input', () => {
-                syncWidth(widthInput.value);
+                previewWidthInput();
+            });
+            widthInput.addEventListener('change', commitWidthInput);
+            widthInput.addEventListener('blur', commitWidthInput);
+            widthInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') commitWidthInput();
             });
         }
         if (heightInput) {
             heightInput.addEventListener('input', () => {
-                syncHeight(heightInput.value);
+                previewHeightInput();
+            });
+            heightInput.addEventListener('change', commitHeightInput);
+            heightInput.addEventListener('blur', commitHeightInput);
+            heightInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') commitHeightInput();
             });
         }
 
