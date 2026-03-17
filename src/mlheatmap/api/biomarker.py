@@ -32,6 +32,26 @@ def _cancelled_response(message: str = "Analysis cancelled at user request."):
     return JSONResponse({"error": message}, status_code=409)
 
 
+def _ordered_group_indices(
+    sample_names: list[str],
+    groups: dict[str, list[str]],
+    excluded_samples: list[str],
+) -> dict[str, list[int]]:
+    """Map group sample names back to the uploaded matrix order."""
+    excluded = set(excluded_samples)
+    ordered_indices: dict[str, list[int]] = {}
+    for group_name, group_samples in groups.items():
+        member_names = {sample for sample in group_samples if sample not in excluded}
+        indices = [
+            idx
+            for idx, sample_name in enumerate(sample_names)
+            if sample_name in member_names
+        ]
+        if indices:
+            ordered_indices[group_name] = indices
+    return ordered_indices
+
+
 def _build_sample_groups_from_parts(
     sample_names: list[str],
     groups: dict[str, list[str]],
@@ -40,17 +60,7 @@ def _build_sample_groups_from_parts(
     if len(groups) < 2:
         return None, "Need at least 2 groups"
 
-    excluded = set(excluded_samples)
-    name_to_idx = {name: idx for idx, name in enumerate(sample_names)}
-    sample_groups: dict[str, list[int]] = {}
-    for group_name, group_samples in groups.items():
-        indices = [
-            name_to_idx[sample]
-            for sample in group_samples
-            if sample in name_to_idx and sample not in excluded
-        ]
-        if indices:
-            sample_groups[group_name] = indices
+    sample_groups = _ordered_group_indices(sample_names, groups, excluded_samples)
 
     if len(sample_groups) < 2:
         return None, f"Only {len(sample_groups)} group(s) have valid samples after exclusion; need at least 2"
@@ -92,17 +102,11 @@ def _snapshot_deg_inputs(
             return None, JSONResponse({"error": "No normalized data"}, status_code=404)
         if len(session.groups) != 2:
             return None, JSONResponse({"error": "DEG requires exactly 2 groups"}, status_code=400)
-        excluded = set(session.excluded_samples)
-        name_to_idx = {name: idx for idx, name in enumerate(session.sample_names)}
-        sample_groups: dict[str, list[int]] = {}
-        for group_name, group_samples in session.groups.items():
-            indices = [
-                name_to_idx[sample]
-                for sample in group_samples
-                if sample in name_to_idx and sample not in excluded
-            ]
-            if indices:
-                sample_groups[group_name] = indices
+        sample_groups = _ordered_group_indices(
+            list(session.sample_names),
+            dict(session.groups),
+            list(session.excluded_samples),
+        )
 
         if len(sample_groups) != 2:
             missing = [group_name for group_name in session.groups if group_name not in sample_groups]
