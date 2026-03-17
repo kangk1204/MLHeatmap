@@ -8,17 +8,21 @@ Interactive RNA-seq heatmap and biomarker discovery tool for bulk count matrices
 
 ![1. Upload Count Matrix](docs/github_images/1_upload.png)
 
-### 2. Run Biomarker Analysis
+### 2. Review AUC Summary
 
-![2. Run Biomarker Analysis](docs/github_images/2_biomarker.png)
+![2. Review AUC Summary](docs/github_images/2_AUC.png)
 
-### 3. Review SHAP Heatmap
+### 3. Run Biomarker Analysis
 
-![3. Review SHAP Heatmap](docs/github_images/3_SHAPheatmap.png)
+![3. Run Biomarker Analysis](docs/github_images/3_biomarker.png)
 
-### 4. Export Results
+### 4. Review SHAP Heatmap
 
-![4. Export Results](docs/github_images/4_export.png)
+![4. Review SHAP Heatmap](docs/github_images/4_SHAPheatmap.png)
+
+### 5. Export Results
+
+![5. Export Results](docs/github_images/5_export.png)
 
 ## Quickstart
 
