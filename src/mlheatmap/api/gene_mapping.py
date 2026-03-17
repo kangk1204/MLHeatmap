@@ -30,16 +30,26 @@ async def map_genes(request: Request, body: MappingRequest):
         if session.raw_counts is None:
             return JSONResponse({"error": "Session not found or no data"}, status_code=404)
         raw_counts = session.raw_counts.copy()
+        detected_id_type = session.id_type
 
     gene_ids = raw_counts.index.astype(str).tolist()
     mapping, unmapped = map_gene_ids(gene_ids, body.species, body.id_type)
     warning = None
+    preserve_raw_symbols = body.id_type == "symbol" or (body.id_type == "auto" and detected_id_type == "symbol")
 
     if mapping:
         df = raw_counts.copy()
         df.index = df.index.astype(str)
-        df["_symbol"] = df.index.map(lambda gene_id: mapping.get(str(gene_id)))
-        df = df.dropna(subset=["_symbol"])
+        if preserve_raw_symbols:
+            if unmapped:
+                warning = (
+                    "Some uploaded gene symbols were not found in the packaged mapping table. "
+                    "They were retained as uploaded identifiers."
+                )
+            df["_symbol"] = df.index.map(lambda gene_id: mapping.get(str(gene_id), str(gene_id)))
+        else:
+            df["_symbol"] = df.index.map(lambda gene_id: mapping.get(str(gene_id)))
+            df = df.dropna(subset=["_symbol"])
         df = df.groupby("_symbol").sum()
         df.index.name = None
         mapped_counts = df
