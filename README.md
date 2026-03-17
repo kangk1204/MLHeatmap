@@ -15,10 +15,16 @@ mlheatmap
 
 The app starts on `http://127.0.0.1:8765`.
 
+To enable the optional `xgboost` and `lightgbm` models in a native installation:
+
+```bash
+pip install ".[full]"
+```
+
 To run the test suite from a local clone:
 
 ```bash
-pip install .[test]
+pip install ".[test]"
 pytest
 ```
 
@@ -90,6 +96,32 @@ Docker is the recommended path when you need the optional `xgboost` and `lightgb
 docker build -t mlheatmap .
 docker run --rm -p 8765:8765 mlheatmap
 ```
+
+### Example Sessions
+
+For the fastest manual smoke test, start with `test_counts.csv` in the repository root. This is the quickest way to verify upload, parsing, and a basic end-to-end run on a very small matrix.
+
+For a more realistic RNA-seq quick-start session, use `test_data/human_60k_8samples.csv` bundled with the repository. This synthetic dataset contains 60,000 Ensembl-style human genes and 8 samples (`Control_1`-`Control_4`, `Treatment_1`-`Treatment_4`).
+
+Suggested session:
+
+1. Start MLHeatmap.
+2. Upload `test_data/human_60k_8samples.csv`.
+3. Use `Gene Mapping` with `Human`.
+4. Normalize with `DESeq2-like VST`.
+5. In `Groups`, auto-detect or assign `Control` and `Treatment`.
+6. Run `DEG` for a quick differential-expression smoke test, or `Biomarker` for a compact binary-classification demo.
+7. Export a figure or results workbook to verify end-to-end output.
+
+Practical note:
+
+- This file is synthetic test data intended for demos, smoke tests, and UI validation. It is not a biological reference dataset.
+
+## Export Options
+
+- Plot and heatmap images are exported in the browser.
+- `Compact XLSX` is the default workbook export. It omits the full normalized expression matrix and is recommended for routine sharing and review.
+- `Full XLSX` includes the `Normalized Expression` sheet and can be substantially larger for RNA-seq datasets.
 
 ## Input Rules
 
@@ -175,7 +207,7 @@ Practical note:
 
 Interpretation notes:
 
-- Do not reuse results produced before this hardening pass
+- Re-run analyses after upgrading if you need publication or audit-grade reproducibility across workflow revisions.
 
 ### DEG analysis
 
