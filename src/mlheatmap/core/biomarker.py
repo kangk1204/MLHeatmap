@@ -10,6 +10,9 @@ from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
 from mlheatmap.core.capabilities import normalize_model_name
 from mlheatmap.core.cancellation import raise_if_cancelled
 
+PREFILTER_MAX_GENES = 2000
+MAX_PANEL_GENES = 15
+
 
 def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100):
     """Return (clf, use_shap_tree, needs_scaling) for the requested model."""
@@ -736,8 +739,8 @@ def run_biomarker_analysis(
     le = LabelEncoder()
     y = le.fit_transform(labels)
     n_all_genes = X_all.shape[1]
-    prefilter_n = min(2000, n_all_genes)
-    max_panel_genes = min(n_top_genes, 15)
+    prefilter_n = min(PREFILTER_MAX_GENES, n_all_genes)
+    max_panel_genes = min(n_top_genes, MAX_PANEL_GENES)
 
     _progress("preprocessing", 5, f"Data prepared — using {model_display}")
 
@@ -747,6 +750,7 @@ def run_biomarker_analysis(
     outer_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     warnings = []
+    roc_skipped_folds: list[tuple[int, str]] = []
     if n_splits < cv_folds:
         warnings.append(
             f"Requested {cv_folds} CV folds, but the smallest class has only {min_class_count} sample(s). "
@@ -824,8 +828,9 @@ def run_biomarker_analysis(
                 fold_roc_tprs[class_idx].append(np.interp(roc_mean_fpr, fpr_f, tpr_f))
                 fold_roc_tprs[class_idx][-1][0] = 0.0
                 fold_roc_aucs[class_idx].append(auc(fpr_f, tpr_f))
-        except Exception:
-            pass
+        except Exception as exc:
+            roc_skipped_folds.append((fold_i + 1, str(exc)))
+            _progress("training", pct, f"ROC summary skipped fold {fold_i + 1} ({exc})")
 
         try:
             import shap
@@ -949,6 +954,12 @@ def run_biomarker_analysis(
             "SHAP could not be computed for one or more CV folds. "
             "Feature importance values were used as a fallback for those folds."
         )
+    if roc_skipped_folds:
+        skipped = ", ".join(f"fold {fold}: {reason}" for fold, reason in roc_skipped_folds)
+        warnings.append(
+            "One or more ROC summaries could not be computed from the fold-specific top-gene model. "
+            f"Skipped {skipped}."
+        )
 
     top_genes = [
         {
@@ -985,10 +996,15 @@ def run_biomarker_analysis(
         "shap_fallback_used": shap_fallback_used,
         "shap_fallback_folds": shap_fallback_folds,
         "warnings": warnings,
+        "panel_size_cap_genes": max_panel_genes,
         "performance_scope": {
             "panel_method": (
                 "Compact panel metrics below use nested outer-CV. "
                 "Top-gene SHAP ranking and ROC above remain out-of-fold summaries of the selected ML model."
-            )
+            ),
+            "panel_size_cap": (
+                f"Compact panel selection currently evaluates at most {MAX_PANEL_GENES} genes "
+                "within the chosen top-gene candidate pool."
+            ),
         },
     }

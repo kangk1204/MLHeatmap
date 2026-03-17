@@ -49,6 +49,9 @@ def compute_deg(
         raw counts, TPM, or size-factor-normalized counts.
     effect_size_basis : str
         Human-readable label for `effect_size_data`.
+        If `effect_size_data` is omitted, a legacy fallback uses the mean
+        difference of `expression`, which is only interpretable as log2FC
+        when `expression` is already on a log scale.
 
     Returns
     -------
@@ -93,7 +96,8 @@ def compute_deg(
             mean_basis_g2 = float(np.mean(basis_g2))
             log2fc = float(np.log2(mean_basis_g1 + 1) - np.log2(mean_basis_g2 + 1))
         else:
-            # Fallback only for legacy callers that do not provide a linear basis.
+            # Legacy fallback only: this is an expression delta, not a true
+            # log2 fold change unless `expression` is already log-scaled.
             log2fc = mean_g1 - mean_g2
         if not np.isfinite(log2fc):
             log2fc = 0.0
@@ -178,7 +182,9 @@ def compute_deg(
         },
         "method": method,
         "pvalue_type": "raw" if use_raw_pvalue else "fdr",
-        "effect_size_basis": effect_size_basis or "normalized_expression",
+        "effect_size_basis": effect_size_basis or (
+            "legacy_expression_delta" if effect_size_data is None else "normalized_expression"
+        ),
     }
 
 
