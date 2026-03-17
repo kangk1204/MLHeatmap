@@ -40,24 +40,6 @@ def get_session_or_error(
     return session, None, normalized
 
 
-def acquire_session_or_error(
-    request: Request,
-    session_id: str,
-    *,
-    not_found_message: str = "Session not found",
-):
-    """Return a validated session with an active-operation lease."""
-    normalized, error = validate_session_id_value(session_id)
-    if error is not None:
-        return None, error, None
-
-    session = request.app.state.sessions.begin_use(normalized)
-    if session is None:
-        return None, JSONResponse({"error": not_found_message}, status_code=404), normalized
-
-    return session.session, None, normalized
-
-
 def acquire_session_lease_or_error(
     request: Request,
     session_id: str,

@@ -45,10 +45,10 @@ const API = {
     async getHeatmap(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            top_n: opts.topN || 500,
-            distance: opts.distance || 'correlation',
-            linkage: opts.linkage || 'average',
-            color_scale: opts.colorScale || 'RdBu_r',
+            top_n: opts.topN ?? 500,
+            distance: opts.distance ?? 'correlation',
+            linkage: opts.linkage ?? 'average',
+            color_scale: opts.colorScale ?? 'RdBu_r',
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });
@@ -90,11 +90,11 @@ const API = {
     biomarkerStream(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            n_top_genes: opts.nTopGenes || 20,
-            n_estimators: opts.nEstimators || 500,
-            cv_folds: opts.cvFolds || 5,
-            model: opts.model || 'rf',
-            panel_method: opts.panelMethod || 'forward',
+            n_top_genes: opts.nTopGenes ?? 20,
+            n_estimators: opts.nEstimators ?? 500,
+            cv_folds: opts.cvFolds ?? 5,
+            model: opts.model ?? 'rf',
+            panel_method: opts.panelMethod ?? 'forward',
         });
         return new EventSource(`${this.baseUrl}/biomarker/stream?${params}`);
     },
@@ -102,14 +102,14 @@ const API = {
     async getHeatmapImage(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            top_n: opts.topN || 500,
-            distance: opts.distance || 'correlation',
-            linkage: opts.linkage || 'average',
-            color_scale: opts.colorScale || 'RdBu_r',
+            top_n: opts.topN ?? 500,
+            distance: opts.distance ?? 'correlation',
+            linkage: opts.linkage ?? 'average',
+            color_scale: opts.colorScale ?? 'RdBu_r',
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
-            fmt: opts.fmt || 'png',
-            dpi: opts.dpi || 150,
+            fmt: opts.fmt ?? 'png',
+            dpi: opts.dpi ?? 150,
         });
         const res = await fetch(`${this.baseUrl}/heatmap/render?${params}`, { signal: opts.signal });
         if (!res.ok) {
@@ -123,10 +123,10 @@ const API = {
     async getShapHeatmap(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            top_n: opts.topN || 20,
-            distance: opts.distance || 'correlation',
-            linkage: opts.linkage || 'average',
-            color_scale: opts.colorScale || 'RdBu_r',
+            top_n: opts.topN ?? 20,
+            distance: opts.distance ?? 'correlation',
+            linkage: opts.linkage ?? 'average',
+            color_scale: opts.colorScale ?? 'RdBu_r',
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });
@@ -138,9 +138,9 @@ const API = {
     async runDeg(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            method: opts.method || 'wilcoxon',
-            log2fc_threshold: opts.log2fcThreshold || 1.0,
-            pvalue_threshold: opts.pvalueThreshold || 0.05,
+            method: opts.method ?? 'wilcoxon',
+            log2fc_threshold: opts.log2fcThreshold ?? 1.0,
+            pvalue_threshold: opts.pvalueThreshold ?? 0.05,
             use_raw_pvalue: opts.useRawPvalue ? 'true' : 'false',
         });
         if (opts.referenceGroup) {
@@ -154,10 +154,10 @@ const API = {
     async getDegHeatmap(sessionId, opts = {}) {
         const params = new URLSearchParams({
             session_id: sessionId,
-            top_n: opts.topN || 30,
-            distance: opts.distance || 'correlation',
-            linkage: opts.linkage || 'average',
-            color_scale: opts.colorScale || 'RdBu_r',
+            top_n: opts.topN ?? 30,
+            distance: opts.distance ?? 'correlation',
+            linkage: opts.linkage ?? 'average',
+            color_scale: opts.colorScale ?? 'RdBu_r',
             cluster_rows: opts.clusterRows !== undefined ? opts.clusterRows : true,
             cluster_cols: opts.clusterCols !== undefined ? opts.clusterCols : true,
         });

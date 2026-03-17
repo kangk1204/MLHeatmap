@@ -164,6 +164,25 @@ Automatic preprocessing:
 
 This repository does not bundle the manuscript matrices, but you can rebuild the CRC CMS example from public sources and analyze it in MLHeatmap.
 
+Fastest path from a local clone:
+
+```bash
+pip install .
+mlheatmap-download-crc-cms --output-dir generated/crc_cms_public
+```
+
+Alternative source-tree entry point:
+
+```bash
+python scripts/prepare_public_crc_cms_gold.py --output-dir generated/crc_cms_public
+```
+
+Expected generated files:
+
+- `generated/crc_cms_public/tcga_crc_cms_gold_counts.tsv.gz`
+- `generated/crc_cms_public/tcga_crc_cms_gold_metadata.tsv`
+- `generated/crc_cms_public/tcga_crc_cms_gold_labels.json`
+
 Download sources:
 
 - TCGA COAD STAR counts: [TCGA-COAD.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-COAD.star_counts.tsv.gz)
@@ -216,6 +235,7 @@ Practical note:
 Interpretation notes:
 
 - Re-run analyses after upgrading if you need publication or audit-grade reproducibility across workflow revisions.
+- Compact-panel selection is currently capped at 15 genes even when `Top Genes` is set higher; larger values expand the candidate pool used before panel reduction.
 
 ### DEG analysis
 
@@ -237,4 +257,4 @@ Interpretation notes:
 - Windows 11
 - Ubuntu
 - macOS Apple Silicon
-- Python 3.11-3.12
+- Python 3.11-3.13

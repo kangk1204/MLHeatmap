@@ -26,6 +26,7 @@ const Upload = {
 
     async handleFile(file) {
         App.showLoading('Uploading and parsing...');
+        const previousSessionId = App.state.sessionId;
         try {
             const result = await API.upload(file);
             App.completedSteps.clear();
@@ -95,6 +96,9 @@ const Upload = {
             document.getElementById('upload-result').classList.remove('hidden');
             document.getElementById('upload-zone').style.display = 'none';
             App.markStepCompleted('upload');
+            if (previousSessionId && previousSessionId !== result.session_id) {
+                API.purgeSession(previousSessionId).catch(() => {});
+            }
             App.showToast('File uploaded successfully', 'success');
 
             // Pre-select species radio

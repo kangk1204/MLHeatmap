@@ -206,11 +206,27 @@ const App = {
             document.getElementById('mapped-count').textContent = result.mapped_count.toLocaleString();
             document.getElementById('unmapped-count').textContent = result.unmapped_count.toLocaleString();
             document.getElementById('total-count').textContent = result.total.toLocaleString();
+            const mappingWarning = document.getElementById('mapping-warning');
+            if (mappingWarning) {
+                const warningMessage = result.warning
+                    || (result.unmapped_count > 0
+                        ? 'Unmapped entries were not found in the reference table. Review the unmapped list before downstream analysis.'
+                        : '');
+                if (warningMessage) {
+                    mappingWarning.textContent = warningMessage;
+                    mappingWarning.classList.remove('hidden');
+                } else {
+                    mappingWarning.textContent = '';
+                    mappingWarning.classList.add('hidden');
+                }
+            }
 
             document.getElementById('mapping-result').classList.remove('hidden');
             this.markStepCompleted('mapping');
 
-            if (result.unmapped_count > result.total * 0.1) {
+            if (result.warning) {
+                this.showToast(result.warning, 'info');
+            } else if (result.unmapped_count > result.total * 0.1) {
                 this.showToast(`Warning: ${result.unmapped_count} genes unmapped (${(result.unmapped_count / result.total * 100).toFixed(1)}%)`, 'error');
             } else {
                 this.showToast('Gene mapping complete', 'success');
