@@ -47,6 +47,7 @@ test = [
 
 [project.scripts]
 mlheatmap = "mlheatmap.cli:main"
+mlheatmap-download-crc-cms = "mlheatmap.public_crc_cms:main"
 
 [tool.hatch.build]
 exclude = [
