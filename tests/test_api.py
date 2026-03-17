@@ -501,6 +501,36 @@ class TestDEG:
 
 
 class TestReentryAndConcurrency:
+    def test_group_indices_follow_uploaded_sample_order(self):
+        from mlheatmap.api.biomarker import _build_sample_groups_from_parts
+
+        sample_names = [
+            "CMS2__S2A",
+            "CMS1__S1A",
+            "CMS4__S4A",
+            "CMS1__S1B",
+            "CMS3__S3A",
+            "CMS2__S2B",
+            "CMS3__S3B",
+            "CMS4__S4B",
+        ]
+        groups = {
+            "CMS1": ["CMS1__S1B", "CMS1__S1A"],
+            "CMS2": ["CMS2__S2B", "CMS2__S2A"],
+            "CMS3": ["CMS3__S3B", "CMS3__S3A"],
+            "CMS4": ["CMS4__S4B", "CMS4__S4A"],
+        }
+
+        sample_groups, error = _build_sample_groups_from_parts(sample_names, groups, [])
+
+        assert error is None
+        assert sample_groups == {
+            "CMS1": [1, 3],
+            "CMS2": [0, 5],
+            "CMS3": [4, 6],
+            "CMS4": [2, 7],
+        }
+
     def test_session_cancel_endpoint_sets_active_cancel_event(self, client):
         session = client.app.state.sessions.create()
         lease = client.app.state.sessions.begin_use(session.id)
