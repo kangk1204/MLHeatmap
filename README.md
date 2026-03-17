@@ -2,6 +2,28 @@
 
 Interactive RNA-seq heatmap and biomarker discovery tool for bulk count matrices.
 
+## Screenshots
+
+### 1. Upload
+
+![Upload workflow](docs/github_images/1_upload.png)
+
+### 2. Classification Performance
+
+![AUC results](docs/github_images/2_AUC.png)
+
+### 3. Biomarker Analysis
+
+![Biomarker results](docs/github_images/3_biomarker.png)
+
+### 4. SHAP Heatmap
+
+![SHAP heatmap](docs/github_images/4_SHAPheatmap.png)
+
+### 5. Export
+
+![Export workflow](docs/github_images/5_export.png)
+
 ## Quickstart
 
 ### Get the repository
