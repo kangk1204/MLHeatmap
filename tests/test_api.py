@@ -134,6 +134,7 @@ class TestUpload:
         data = r.json()
         assert "filtering" in data
         assert data["filtering"]["before"] >= data["filtering"]["after"]
+        assert data["filtering"]["applied"] is False
 
     def test_upload_sparse_data(self, client):
         path = os.path.join(DATA_DIR, "sparse_edge_case.csv")
@@ -141,7 +142,7 @@ class TestUpload:
             r = client.post("/api/v1/upload", files={"file": ("sparse.csv", f, "text/csv")})
         assert r.status_code == 200
         data = r.json()
-        assert data["shape"][0] > 0  # Some genes should survive filtering
+        assert data["shape"][0] > 0  # Some genes should survive upload preprocessing
 
     def test_upload_reads_with_bounded_size(self):
         from mlheatmap.api.session import SessionStore
@@ -187,6 +188,25 @@ class TestGeneMapping:
         assert "mapped_count" in data
         assert "unmapped_count" in data
         assert data["mapped_count"] + data["unmapped_count"] == data["total"]
+
+    def test_map_genes_symbol_input_preserves_unmapped_rows(self, client):
+        csv_bytes = b"gene_id,S1,S2\nTP53,10,12\nBRCA1,8,9\nFAKESYM,3,4\n"
+        r = client.post("/api/v1/upload", files={"file": ("symbols.csv", csv_bytes, "text/csv")})
+        assert r.status_code == 200
+        sid = r.json()["session_id"]
+
+        r = client.post("/api/v1/gene-mapping", json={
+            "session_id": sid,
+            "species": "human",
+            "id_type": "auto",
+        })
+        assert r.status_code == 200
+
+        session = client.app.state.sessions.get(sid)
+        assert session is not None
+        with session.state_lock:
+            assert "TP53" in session.gene_names
+            assert "FAKESYM" in session.gene_names
 
     def test_map_genes_invalid_session(self, client):
         r = client.post("/api/v1/gene-mapping", json={

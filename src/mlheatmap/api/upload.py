@@ -15,7 +15,6 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     from mlheatmap.core.gene_mapping import detect_id_type
     from mlheatmap.core.input_io import (
         MatrixValidationError,
-        filter_low_expression,
         load_count_matrix_bytes,
         strict_numeric_matrix,
     )
@@ -40,11 +39,17 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     finally:
         await file.close()
 
+    n_before_preprocessing = int(df.shape[0])
     df = df.loc[(df != 0).any(axis=1)]
     if df.empty:
         return JSONResponse({"error": "No valid numeric data found"}, status_code=400)
-
-    df, filtering = filter_low_expression(df)
+    filtering = {
+        "before": n_before_preprocessing,
+        "after": int(df.shape[0]),
+        "removed": n_before_preprocessing - int(df.shape[0]),
+        "applied": False,
+        "note": "Low-expression filtering is disabled by default to preserve reproducibility of uploaded matrices.",
+    }
 
     gene_ids = df.index.astype(str).tolist()
     species, id_type = detect_id_type(gene_ids)

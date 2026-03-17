@@ -2,28 +2,6 @@
 
 Interactive RNA-seq heatmap and biomarker discovery tool for bulk count matrices.
 
-## Interface Preview
-
-### 1. Upload Count Matrix
-
-![1. Upload Count Matrix](docs/github_images/1_upload.png)
-
-### 2. Review AUC Summary
-
-![2. Review AUC Summary](docs/github_images/2_AUC.png)
-
-### 3. Run Biomarker Analysis
-
-![3. Run Biomarker Analysis](docs/github_images/3_biomarker.png)
-
-### 4. Review SHAP Heatmap
-
-![4. Review SHAP Heatmap](docs/github_images/4_SHAPheatmap.png)
-
-### 5. Export Results
-
-![5. Export Results](docs/github_images/5_export.png)
-
 ## Quickstart
 
 ### Get the repository
@@ -179,77 +157,23 @@ Fail-closed validation:
 Automatic preprocessing:
 
 - All-zero genes are removed
-- Low-expression genes are filtered with the default rule: count `>= 10` in at least `max(2, 20% of samples)` samples
+- Low-expression filtering is disabled by default so uploaded matrices remain reproducible between the app and manuscript workflows
+- For symbol-based inputs, gene mapping preserves uploaded symbols that are not present in the packaged mapping table
 
 ## Public CRC CMS Example
 
 This repository does not bundle the manuscript matrices, but you can rebuild the CRC CMS example from public sources and analyze it in MLHeatmap.
-
-Beginner copy-paste path:
-
-1. Install MLHeatmap from this repository:
-
-```bash
-pip install .
-```
-
-2. Build the public manuscript input matrix:
-
-```bash
-mlheatmap-download-crc-cms --output-dir generated/crc_cms_public
-```
-
-3. Start the app:
-
-```bash
-mlheatmap
-```
-
-4. Upload the generated file:
-
-- `generated/crc_cms_public/tcga_crc_cms_gold_counts.tsv.gz`
-
-5. In the app:
-
-- `Gene Mapping` -> `Human`
-- `Normalize` -> `DESeq2-like VST`
-- `Groups` -> `Auto-detect`
-- `Biomarker` -> run the 4-class CMS analysis
-
-If you are running from a source checkout without installing the package entry point, use this instead:
-
-```bash
-python scripts/prepare_public_crc_cms_gold.py --output-dir generated/crc_cms_public
-```
-
-The command downloads the public Xena count matrices, probe map, and CRCSC label file, then writes:
-
-- `generated/crc_cms_public/tcga_crc_cms_gold_counts.tsv.gz`
-- `generated/crc_cms_public/tcga_crc_cms_gold_metadata.tsv`
-- `generated/crc_cms_public/tcga_crc_cms_gold_labels.json`
-
-The processed count matrix is ready for direct upload into MLHeatmap. Sample names are prefixed as `CMS1__...`, `CMS2__...`, `CMS3__...`, or `CMS4__...` so that `Groups -> Auto-detect` works immediately.
-
-Expected output after a successful build:
-
-- `21098` genes
-- `511` samples
-- CMS distribution: `CMS1=76`, `CMS2=220`, `CMS3=72`, `CMS4=143`
-
-Practical notes:
-
-- The first run downloads about 70 MB of public source files.
-- Output files are written under `generated/crc_cms_public/`.
-- The generated `.tsv.gz` file can be uploaded directly without manual decompression.
 
 Download sources:
 
 - TCGA COAD STAR counts: [TCGA-COAD.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-COAD.star_counts.tsv.gz)
 - TCGA READ STAR counts: [TCGA-READ.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-READ.star_counts.tsv.gz)
 - Gene symbol probe map: [gencode.v36.annotation.gtf.gene.probemap](https://gdc.xenahubs.net/download/gencode.v36.annotation.gtf.gene.probemap)
+- TCGA COAD clinical matrix: [COAD_clinicalMatrix](https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.COAD.sampleMap%2FCOAD_clinicalMatrix)
+- TCGA READ clinical matrix: [READ_clinicalMatrix](https://tcga-xena-hub.s3.us-east-1.amazonaws.com/download/TCGA.READ.sampleMap%2FREAD_clinicalMatrix)
 - CRCSC final CMS labels: [cms_labels_public_all.txt](https://raw.githubusercontent.com/Sage-Bionetworks/crc-cms-kras/master/020717/cms_labels_public_all.txt)
 
-Preparation steps performed by the script:
+Prepare an MLHeatmap-ready matrix:
 
 1. Merge the COAD and READ STAR count matrices on Ensembl gene IDs.
 2. Keep primary tumor samples only. For TCGA barcodes, this is sample type `01`.

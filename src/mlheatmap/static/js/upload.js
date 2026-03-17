@@ -85,8 +85,10 @@ const Upload = {
                 document.getElementById('filter-before').textContent = fi.before.toLocaleString();
                 document.getElementById('filter-after').textContent = fi.after.toLocaleString();
                 document.getElementById('filter-removed').textContent = fi.removed.toLocaleString();
-                document.getElementById('filter-min-count').textContent = fi.min_count;
-                document.getElementById('filter-min-samples').textContent = fi.min_samples;
+                const desc = document.getElementById('filter-desc');
+                if (desc) {
+                    desc.textContent = fi.note || 'Upload preprocessing summary.';
+                }
                 document.getElementById('filter-info').classList.remove('hidden');
             }
 
