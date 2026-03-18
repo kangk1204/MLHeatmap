@@ -261,20 +261,22 @@ class TestSession:
     def test_active_operation_lease_blocks_cleanup(self):
         from mlheatmap.api.session import SessionStore
 
-        store = SessionStore(ttl_hours=0)
+        store = SessionStore(ttl_hours=1)
         session = store.create()
         lease = store.begin_use(session.id)
         assert lease is not None
         assert lease.session is session
 
+        # Simulate expiry while lease is held — cleanup must NOT remove it
         with session.state_lock:
-            session.last_accessed_at = time.time() - 60
+            session.last_accessed_at = time.time() - 7200
         store._cleanup()
         assert store.get(session.id) is session
 
+        # After releasing the lease, expired session should be cleaned up
         store.end_use(session.id, lease.operation_id)
         with session.state_lock:
-            session.last_accessed_at = time.time() - 60
+            session.last_accessed_at = time.time() - 7200
         store._cleanup()
         assert store.get(session.id) is None
 
