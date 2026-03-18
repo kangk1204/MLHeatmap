@@ -128,23 +128,38 @@ docker run --rm -p 8765:8765 mlheatmap
 
 ### Example Sessions
 
-For the fastest manual smoke test, start with `test_counts.csv` in the repository root. This is the quickest way to verify upload, parsing, and a basic end-to-end run on a very small matrix.
+If you want one file to test the app from upload to export, start with:
 
-For a more realistic RNA-seq quick-start session, use `test_data/human_60k_8samples.csv` bundled with the repository. This synthetic dataset contains 60,000 Ensembl-style human genes and 8 samples (`Control_1`-`Control_4`, `Treatment_1`-`Treatment_4`).
+`test_data/human_ensembl_12samples.csv`
 
-Suggested session:
+This is now the main bundled demo dataset. It is small enough to run quickly, but large enough to exercise gene mapping, normalization, binary grouping, biomarker analysis, DEG, heatmap rendering, and export.
 
-1. Start MLHeatmap.
-2. Upload `test_data/human_60k_8samples.csv`.
-3. Use `Gene Mapping` with `Human`.
+What this file contains:
+
+- 12 human samples
+- 6 `Control_*` samples
+- 6 `Treated_*` samples
+- Ensembl-style human gene IDs in the first column
+- Integer count values in every remaining cell
+
+Suggested first run:
+
+1. Start MLHeatmap with `mlheatmap`.
+2. Upload `test_data/human_ensembl_12samples.csv`.
+3. In `Gene Mapping`, choose `Human` and keep `Auto-detect`.
 4. Normalize with `DESeq2-like VST`.
-5. In `Groups`, auto-detect or assign `Control` and `Treatment`.
-6. Run `DEG` for a quick differential-expression smoke test, or `Biomarker` for a compact binary-classification demo.
-7. Export a figure or results workbook to verify end-to-end output.
+5. In `Groups`, click `Auto-detect` or assign `Control` and `Treated`.
+6. Run `Biomarker` for a simple 2-group marker demo, or `DEG` for a quick differential-expression check.
+7. Export a plot or workbook to confirm the full workflow.
+
+Other bundled test files:
+
+- `test_counts.csv`: the smallest parser smoke-test file
+- `test_data/human_60k_8samples.csv`: a larger synthetic RNA-seq matrix for performance and UI checks
 
 Practical note:
 
-- This file is synthetic test data intended for demos, smoke tests, and UI validation. It is not a biological reference dataset.
+- These files are synthetic test data for demos, smoke tests, and UI validation. They are not biological reference datasets.
 
 ## Export Options
 
@@ -169,6 +184,35 @@ Accepted formats:
 - `.tsv.gz`
 - `.txt.gz`
 - `.xlsx`
+
+Minimal CSV example:
+
+```csv
+gene_id,Control_1,Control_2,Treated_1,Treated_2
+ENSG00000100000,213,78,1414,1071
+ENSG00000100001,158,58,2569,2965
+ENSG00000100002,157,106,526,1153
+```
+
+How to read this format:
+
+- Each row is one gene
+- The first column is the gene identifier
+- Each remaining column is one sample
+- The header row contains the sample names
+- Every value after the first column must be numeric
+
+Common valid first-column examples:
+
+- Human Ensembl IDs such as `ENSG00000141510`
+- Human gene symbols such as `TP53`
+- Mouse Ensembl IDs such as `ENSMUSG00000059552`
+- Mouse gene symbols such as `Trp53`
+
+Sample naming tips:
+
+- `Control_1`, `Control_2`, `Treated_1`, `Treated_2` works well for binary demos
+- `CMS1__SampleA`, `CMS2__SampleB`, `CMS3__SampleC` works well when you want `Groups -> Auto-detect` to create labeled classes automatically
 
 Fail-closed validation:
 
