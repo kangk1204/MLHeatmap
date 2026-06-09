@@ -10,10 +10,13 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends libgomp1 && \
     rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml README.md LICENSE requirements-lock.txt ./
 COPY src ./src
 
+# Install the pinned, tested versions first so the image reproduces the
+# manuscript results exactly, then install the package (deps already satisfied).
 RUN python -m pip install --upgrade pip && \
+    python -m pip install -r requirements-lock.txt && \
     python -m pip install ".[full]"
 
 EXPOSE 8765
