@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
+
+# scikit-learn >=1.9 emits a benign config-propagation notice
+# ("`sklearn.utils.parallel.delayed` should be used with ...") every time an
+# ensemble estimator fits trees with n_jobs in a worker thread. Forward selection
+# refits hundreds of small models, so this otherwise floods logs (hundreds of MB)
+# and dominates wall-clock, without affecting results. A normal warnings filter
+# does not hold, because sklearn.utils.parallel._FuncWrapper.__call__ runs
+# warnings.resetwarnings() inside its own context and clears the filter list.
+# Overriding showwarning (which resetwarnings() does not touch) reliably drops
+# just this one message while passing every other warning through unchanged.
+_SKLEARN_DELAYED_NOISE = "sklearn.utils.parallel.delayed"
+
+
+def _install_sklearn_delayed_warning_filter() -> None:
+    if getattr(warnings, "_mlheatmap_delayed_filter", False):
+        return
+    original_showwarning = warnings.showwarning
+
+    def _showwarning(message, category, filename, lineno, file=None, line=None):
+        if _SKLEARN_DELAYED_NOISE in str(message):
+            return
+        return original_showwarning(message, category, filename, lineno, file, line)
+
+    warnings.showwarning = _showwarning
+    warnings._mlheatmap_delayed_filter = True
+
+
+_install_sklearn_delayed_warning_filter()
 from sklearn.metrics import auc, roc_curve
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, label_binarize, StandardScaler
@@ -168,6 +198,39 @@ def _feature_importance_vector(clf) -> np.ndarray:
         coef = np.abs(np.asarray(clf.coef_, dtype=np.float64))
         return np.mean(coef, axis=0) if coef.ndim > 1 else coef.ravel()
     return np.ones(getattr(clf, "n_features_in_", 1), dtype=np.float64)
+
+
+def _shap_importance_on(clf, X: np.ndarray, use_shap_tree: bool) -> np.ndarray | None:
+    """Mean |SHAP| per feature computed on ``X`` (used for SHAP-based selection).
+
+    Returns a length-``X.shape[1]`` vector, or None on failure so the caller can
+    fall back to native model importance. Mirrors the explainer dispatch used for
+    the displayed/held-out SHAP ranking.
+    """
+    try:
+        import shap
+
+        if use_shap_tree:
+            explainer = shap.TreeExplainer(clf)
+        else:
+            try:
+                explainer = shap.LinearExplainer(clf, X)
+            except Exception:
+                bg_size = min(50, len(X))
+                bg_idx = np.random.RandomState(42).choice(len(X), bg_size, replace=False)
+                explainer = shap.KernelExplainer(clf.predict_proba, X[bg_idx])
+        shap_values = explainer.shap_values(X)
+        if isinstance(shap_values, list):
+            abs_mean = np.mean([np.abs(sv) for sv in shap_values], axis=0)
+        elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+            abs_mean = np.mean(np.abs(shap_values), axis=2)
+        else:
+            abs_mean = np.abs(shap_values)
+        if abs_mean.ndim == 1:
+            abs_mean = abs_mean.reshape(1, -1)
+        return np.mean(abs_mean, axis=0)
+    except Exception:
+        return None
 
 
 def _predict_proba_full(clf, X: np.ndarray, n_classes: int) -> np.ndarray:
@@ -693,6 +756,16 @@ def _aggregate_panel_summary(
         for gene, stats in ranked_consensus
     ]
 
+    # Per-fold selected gene sets (panel of the consensus best size in each fold),
+    # used for fold-overlap / UpSet visualization and export.
+    fold_panels = [
+        {
+            "fold": fold_i + 1,
+            "genes": [gene_names[gene_idx] for gene_idx in list(panel["ordered_idx"])[:best_n]],
+        }
+        for fold_i, panel in enumerate(panel_orders)
+    ]
+
     heldout_best = heldout_by_k.get(best_n, [])
     return {
         "best_genes": best_genes,
@@ -704,6 +777,8 @@ def _aggregate_panel_summary(
         "auc_note": "nested_outer_cv",
         "evaluation": "nested_outer_cv",
         "selection_frequency": selection_frequency,
+        "fold_panels": fold_panels,
+        "n_folds": len(panel_orders),
     }
 
 
@@ -718,9 +793,37 @@ def run_biomarker_analysis(
     panel_method: str = "forward",
     progress_callback=None,
     cancel_check=None,
+    raw_counts: np.ndarray | None = None,
+    norm_method: str = "deseq2",
+    per_fold_normalize: bool = False,
+    selection_basis: str = "importance",
+    random_state: int = 42,
 ) -> dict:
-    """Full biomarker discovery pipeline with reviewer-safe nested CV."""
+    """Full biomarker discovery pipeline with reviewer-safe nested CV.
+
+    Normalization scope
+    -------------------
+    By default the pipeline consumes ``expression`` that was already normalized
+    once on the full cohort (global normalization). When ``per_fold_normalize``
+    is True and ``raw_counts`` (genes x samples, aligned to ``gene_names`` and to
+    the columns of ``expression``) is supplied, the cross-sample normalization is
+    instead *fit on each outer-CV training split only* and applied to the held-out
+    fold, removing any dependence of the transform on test-fold samples. The
+    global ``expression`` is then used only for display-oriented outputs
+    (SHAP heatmap expression), never for fold performance estimation.
+
+    Selection basis
+    ---------------
+    ``selection_basis`` controls how the fold-local ROC top-N gene set and the
+    compact-panel candidate pool are ranked: ``"importance"`` (default) uses the
+    fitted model's native feature importance (tree impurity or |coef|);
+    ``"shap"`` uses mean |SHAP| computed on the *training* split. SHAP is always
+    computed on held-out samples for the displayed/exported ranking regardless of
+    this setting.
+    """
     raise_if_cancelled(cancel_check)
+    if selection_basis not in ("importance", "shap"):
+        raise ValueError("selection_basis must be 'importance' or 'shap'.")
 
     def _progress(step, pct, msg):
         if progress_callback:
@@ -736,6 +839,23 @@ def run_biomarker_analysis(
 
     X_all = expression[:, sample_indices].T
     all_gene_names = list(gene_names)
+
+    raw_sel = None
+    if per_fold_normalize:
+        from mlheatmap.core.normalization import NORMALIZATION_METHODS
+
+        if raw_counts is None:
+            raise ValueError(
+                "per_fold_normalize=True requires raw_counts (genes x samples) "
+                "aligned to gene_names and the columns of expression."
+            )
+        if norm_method not in NORMALIZATION_METHODS:
+            raise ValueError(f"Unknown norm_method: {norm_method}. Choose from {NORMALIZATION_METHODS}.")
+        raw_arr = np.asarray(raw_counts, dtype=np.float64)
+        if raw_arr.shape[0] != expression.shape[0]:
+            raise ValueError("raw_counts gene axis must match expression/gene_names length.")
+        raw_sel = raw_arr[:, sample_indices]
+
     le = LabelEncoder()
     y = le.fit_transform(labels)
     n_all_genes = X_all.shape[1]
@@ -747,7 +867,7 @@ def run_biomarker_analysis(
     _, use_shap_tree, needs_scaling = _build_model(model, n_estimators, len(y))
     min_class_count = int(min(np.bincount(y)))
     n_splits = max(2, min(cv_folds, min_class_count))
-    outer_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    outer_cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
     warnings = []
     roc_skipped_folds: list[tuple[int, str]] = []
@@ -784,10 +904,17 @@ def run_biomarker_analysis(
         pct = 15 + int(fold_i / n_splits * 50)
         _progress("training", pct, f"CV fold {fold_i + 1}/{n_splits}")
 
-        X_train_all = X_all[train_idx]
-        X_test_all = X_all[test_idx]
         y_train = y[train_idx]
         y_test = y[test_idx]
+        if per_fold_normalize:
+            from mlheatmap.core.normalization import FoldNormalizer
+
+            fold_norm = FoldNormalizer(norm_method).fit(raw_sel[:, train_idx])
+            X_train_all = fold_norm.transform(raw_sel[:, train_idx]).T
+            X_test_all = fold_norm.transform(raw_sel[:, test_idx]).T
+        else:
+            X_train_all = X_all[train_idx]
+            X_test_all = X_all[test_idx]
 
         train_var = np.nan_to_num(np.var(X_train_all, axis=0), nan=0.0)
         fold_var_idx = np.argsort(train_var)[-prefilter_n:]
@@ -805,7 +932,16 @@ def run_biomarker_analysis(
         fold_importances[fold_var_idx] += this_fi
         fold_accuracies.append(float(np.mean(clf.predict(X_test) == y_test)))
 
-        fold_topn_local = np.argsort(this_fi)[-n_top_genes:]
+        # Ranking used to choose the fold-local ROC top-N set and panel candidate
+        # pool. Default is native model importance; "shap" uses mean |SHAP| on the
+        # training split (no held-out leakage). Falls back to importance on error.
+        selection_fi = this_fi
+        if selection_basis == "shap":
+            shap_fi = _shap_importance_on(clf, X_train, use_shap_tree)
+            if shap_fi is not None and shap_fi.shape == this_fi.shape:
+                selection_fi = shap_fi
+
+        fold_topn_local = np.argsort(selection_fi)[-n_top_genes:]
         try:
             clf_topn, _, _ = _build_model(model, min(100, n_estimators), len(y_train))
             X_tr_topn = X_train_all[:, fold_var_idx[fold_topn_local]]
@@ -869,7 +1005,7 @@ def run_biomarker_analysis(
 
         if max_panel_genes > 0:
             panel_candidate_n = min(max(n_top_genes, max_panel_genes), len(fold_var_idx))
-            candidate_local = np.argsort(this_fi)[-panel_candidate_n:][::-1]
+            candidate_local = np.argsort(selection_fi)[-panel_candidate_n:][::-1]
             candidate_idx = fold_var_idx[candidate_local].tolist()
 
             _progress("optimal", 68 + int((fold_i + 1) / n_splits * 20), f"Nested panel selection {fold_i + 1}/{n_splits}")
@@ -991,6 +1127,9 @@ def run_biomarker_analysis(
         "optimal_combo": optimal_combo,
         "model": model_display,
         "panel_method": panel_method,
+        "normalization_scope": "fold_isolated" if per_fold_normalize else "global",
+        "norm_method": norm_method if per_fold_normalize else None,
+        "selection_basis": selection_basis,
         "cv_folds_requested": cv_folds,
         "cv_folds_used": n_splits,
         "shap_fallback_used": shap_fallback_used,

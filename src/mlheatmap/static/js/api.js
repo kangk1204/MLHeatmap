@@ -95,6 +95,8 @@ const API = {
             cv_folds: opts.cvFolds ?? 5,
             model: opts.model ?? 'rf',
             panel_method: opts.panelMethod ?? 'forward',
+            per_fold_normalize: opts.perFoldNormalize ? 'true' : 'false',
+            selection_basis: opts.selectionBasis ?? 'importance',
         });
         return new EventSource(`${this.baseUrl}/biomarker/stream?${params}`);
     },

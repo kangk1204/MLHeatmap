@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/css/main.css?v=42">
+    <link rel="stylesheet" href="/static/css/main.css?v=43">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='72'>MH</text></svg>">
 </head>
 <body>
@@ -253,6 +253,15 @@
                     </div>
                 </div>
 
+                <p class="method-desc" id="norm-input-notice">
+                    MLHeatmap is designed for bulk RNA-seq <strong>count</strong> matrices.
+                    DESeq2-like VST and CPM+Log2 assume integer counts. Microarray or other
+                    already-normalized (log-scale) data should be pre-processed separately
+                    (probe-to-gene summarization and array normalization) and uploaded as a
+                    matrix; for such input use <strong>Log2(count+1)</strong> only if values are
+                    still on a linear scale, otherwise treat it as an external validation step.
+                </p>
+
                 <button class="btn btn-primary" id="btn-normalize">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                     Normalize
@@ -362,7 +371,7 @@
                     <div class="control-group">
                         <label>Panel Selection</label>
                         <select id="panel-method-select" class="select-input">
-                            <option value="forward">Forward Selection (SHAP)</option>
+                            <option value="forward">Forward Selection</option>
                             <option value="lasso">LASSO</option>
                             <option value="stability">Stability Selection</option>
                             <option value="mrmr">mRMR</option>
@@ -379,6 +388,30 @@
                     <div class="control-group">
                         <label>CV Folds <span class="param-range">(2-10)</span></label>
                         <input type="number" id="cv-folds" class="number-input" value="5" min="2" max="10">
+                    </div>
+                    <div class="control-group">
+                        <label>Normalization Scope</label>
+                        <select id="norm-scope-select" class="select-input" title="Fold-isolated re-fits normalization inside each training fold to avoid information leakage from held-out samples.">
+                            <option value="global">Global (default)</option>
+                            <option value="per_fold">Fold-isolated (no leakage)</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Candidate Ranking</label>
+                        <select id="selection-basis-select" class="select-input" title="How the fold-local ROC top-N set and panel candidate pool are ranked.">
+                            <option value="importance">Model importance (default)</option>
+                            <option value="shap">SHAP (training fold)</option>
+                        </select>
+                    </div>
+                    <div class="control-group preset-group">
+                        <label>Preset</label>
+                        <div class="preset-row">
+                            <select id="preset-select" class="select-input">
+                                <option value="">&mdash; Saved presets &mdash;</option>
+                            </select>
+                            <button class="btn btn-xs btn-outline" id="btn-save-preset" type="button" title="Save current settings as a preset">Save</button>
+                            <button class="btn btn-xs btn-outline" id="btn-delete-preset" type="button" title="Delete the selected preset">Delete</button>
+                        </div>
                     </div>
                     <button class="btn btn-primary btn-glow" id="btn-run-biomarker">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -428,7 +461,11 @@
                     <div class="progress-bar">
                         <div class="progress-fill" id="progress-fill"></div>
                     </div>
-                    <p class="progress-text" id="progress-text">Preparing...</p>
+                    <div class="progress-row">
+                        <p class="progress-text" id="progress-text">Preparing...</p>
+                        <span class="progress-eta" id="progress-eta"></span>
+                        <button class="btn btn-sm btn-outline btn-stop" id="btn-stop-biomarker" type="button">Stop</button>
+                    </div>
                 </div>
 
                 <div class="biomarker-results hidden" id="biomarker-results">
@@ -451,6 +488,12 @@
                         <p class="panel-auc-note hidden" id="panel-auc-note"></p>
                         <div id="optimal-auc-curve" style="width:100%;height:350px;"></div>
                         <div class="optimal-gene-list" id="optimal-gene-list"></div>
+                    </div>
+                    <div class="glass-card result-card hidden" id="fold-overlap-card">
+                        <h3>Cross-Fold Panel Overlap <span class="eval-tag internal">selection stability</span></h3>
+                        <p class="method-desc" id="fold-overlap-desc"></p>
+                        <div id="fold-overlap-plot" style="width:100%;height:340px;"></div>
+                        <div class="table-wrapper" id="fold-overlap-table"></div>
                     </div>
                     <div class="glass-card">
                         <h3>Top Biomarker Genes</h3>
@@ -690,12 +733,12 @@
     <!-- Toast notifications -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script src="/static/js/api.js?v=43"></script>
-    <script src="/static/js/upload.js?v=43"></script>
-    <script src="/static/js/heatmap.js?v=43"></script>
-    <script src="/static/js/groups.js?v=43"></script>
-    <script src="/static/js/biomarker.js?v=43"></script>
-    <script src="/static/js/export.js?v=43"></script>
-    <script src="/static/js/app.js?v=43"></script>
+    <script src="/static/js/api.js?v=44"></script>
+    <script src="/static/js/upload.js?v=44"></script>
+    <script src="/static/js/heatmap.js?v=44"></script>
+    <script src="/static/js/groups.js?v=44"></script>
+    <script src="/static/js/biomarker.js?v=44"></script>
+    <script src="/static/js/export.js?v=44"></script>
+    <script src="/static/js/app.js?v=44"></script>
 </body>
 </html>
