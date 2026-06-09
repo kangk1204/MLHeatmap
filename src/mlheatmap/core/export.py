@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import io
+import platform
 from typing import Any
 
 from mlheatmap import __version__
+
+_REPORTED_PACKAGES = (
+    "numpy", "scipy", "pandas", "scikit-learn", "shap", "xgboost", "lightgbm",
+)
+
+
+def _package_versions() -> dict[str, str]:
+    """Versions of the analysis libraries, for reproducibility of exported results."""
+    versions: dict[str, str] = {"python": platform.python_version()}
+    for name in _REPORTED_PACKAGES:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = "not installed"
+    return versions
 
 
 def build_results_metadata(session) -> dict[str, Any]:
@@ -15,6 +32,7 @@ def build_results_metadata(session) -> dict[str, Any]:
             "name": "MLHeatmap",
             "version": __version__,
         },
+        "packages": _package_versions(),
         "session": {
             "id": session.id,
             "species": session.species,
