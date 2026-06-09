@@ -88,9 +88,9 @@ def _write_results_workbook(writer, session, include_normalized_expression: bool
                 for gene in ordered_genes:
                     row: dict[str, Any] = {"gene": gene}
                     selected_count = 0
-                    for fold_panel in fold_panels:
+                    for fold_idx, fold_panel in enumerate(fold_panels, start=1):
                         in_fold = int(gene in fold_panel.get("genes", []))
-                        row[f"fold{fold_panel.get('fold')}"] = in_fold
+                        row[f"fold{fold_panel.get('fold', fold_idx)}"] = in_fold
                         selected_count += in_fold
                     row["n_folds_selected"] = selected_count
                     overlap_rows.append(row)

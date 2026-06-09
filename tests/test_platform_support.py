@@ -56,7 +56,7 @@ def test_capabilities_endpoint_reports_core_runtime():
     assert response.status_code == 200
 
     data = response.json()
-    assert data["python"]["supported"] == ">=3.11,<3.13"
+    assert data["python"]["supported"] == ">=3.11,<3.14"
     assert data["gene_tables"]["human"] is True
     assert data["gene_tables"]["mouse"] is True
     assert data["exports"]["image_mode"] == "browser"

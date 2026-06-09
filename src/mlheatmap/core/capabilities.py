@@ -9,7 +9,7 @@ from typing import Any
 
 from mlheatmap.core.gene_mapping import has_gene_table
 
-SUPPORTED_PYTHON = ">=3.11,<3.13"
+SUPPORTED_PYTHON = ">=3.11,<3.14"
 
 MODEL_SPECS: dict[str, dict[str, str | None]] = {
     "rf": {"label": "Random Forest", "module": None, "install_profile": "core"},

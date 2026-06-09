@@ -85,11 +85,10 @@ Each installer:
 - Runs `mlheatmap --self-check`
 - Starts the app locally
 
-Validation note:
+Validation note (this describes one supported install path, not a requirement):
 
-- On the validation machine used for this repository, system Python `3.11`/`3.12` was not available.
-- Verification therefore used a user-scope Python `3.12` bootstrap path before creating the local `.venv`.
-- The app and tests still completed successfully, but that validation path is not the same as reproducing the README with a preinstalled system Python.
+- The installer prefers a preinstalled system Python `3.11`/`3.12` (`py -3.12`, the standard install locations, or `python`) and uses it directly when present.
+- On a machine where none is preinstalled, it bootstraps a user-scope Python `3.12` before creating the local `.venv`. This repository was validated via that bootstrap path, and the app and tests completed successfully.
 
 After installation, restart with:
 
@@ -166,6 +165,7 @@ Practical note:
 - Plot and heatmap images are exported in the browser.
 - `Compact XLSX` is the default workbook export. It omits the full normalized expression matrix and is recommended for routine sharing and review.
 - `Full XLSX` includes the `Normalized Expression` sheet and can be substantially larger for RNA-seq datasets.
+- Both workbook modes include a `Panel Fold Overlap` sheet (a gene-by-fold membership matrix) when a biomarker panel is present, supporting cross-fold / UpSet-style selection-stability analysis.
 
 ## Input Rules
 
@@ -223,7 +223,7 @@ Fail-closed validation:
 Automatic preprocessing:
 
 - All-zero genes are removed
-- Low-expression filtering is disabled by default so uploaded matrices remain reproducible between the app and manuscript workflows
+- Low-expression filtering is disabled in the app's upload step, so the matrix you upload is analyzed as provided (the bundled CRC-CMS rebuild script applies a low-expression filter when preparing that public dataset, to match the manuscript preprocessing)
 - For symbol-based inputs, gene mapping preserves uploaded symbols that are not present in the packaged mapping table
 
 ## Public CRC CMS Example
@@ -248,6 +248,8 @@ Expected generated files:
 - `generated/crc_cms_public/tcga_crc_cms_gold_counts.tsv.gz`
 - `generated/crc_cms_public/tcga_crc_cms_gold_metadata.tsv`
 - `generated/crc_cms_public/tcga_crc_cms_gold_labels.json`
+
+Expected result (for reproducibility checks): the rebuilt matrix has **511 primary-tumor samples** (gene-symbol rows) with CMS distribution **76 CMS1, 220 CMS2, 72 CMS3, 143 CMS4** (see `tcga_crc_cms_gold_labels.json`). If your numbers differ, check that primary-tumor filtering (TCGA sample type `01`) and the CRCSC gold labels (NOLBL excluded) were applied.
 
 Download sources:
 
@@ -303,7 +305,7 @@ Why a DESeq2-like VST as the default: median-of-ratios size factors with a varia
 ### Biomarker analysis
 
 - Compact panel selection (`forward`, `lasso`, `stability`, `mrmr`) uses nested outer CV
-- The fold-local ROC top-N model and the compact-panel candidate pool are ranked by **model-based feature importance** (impurity for tree models, mean absolute coefficients for linear models). **SHAP** values are computed separately on held-out outer-fold samples and drive the *displayed/exported* top-gene ranking and the SHAP heatmap. You can switch the candidate ranking to SHAP with the **Candidate Ranking** control (`selection_basis = importance | shap`); both give concordant panels in our CRC-CMS case study.
+- The fold-local ROC top-N model and the compact-panel candidate pool are ranked by **model-based feature importance** (impurity for tree models, mean absolute coefficients for linear models). **SHAP** values are computed separately on held-out outer-fold samples and drive the *displayed/exported* top-gene ranking and the SHAP heatmap. You can switch the candidate ranking to SHAP with the **Candidate Ranking** control (`selection_basis = importance | shap`); in our CRC-CMS case study the two settings gave statistically indistinguishable held-out performance and substantially overlapping panels (9 of 13 genes shared).
 - `optimal_combo.best_auc` is the mean held-out AUC from the outer folds
 - `optimal_combo.selection_frequency` reports how often each consensus panel gene was selected across folds, and `optimal_combo.fold_panels` lists each fold's selected panel (used for the cross-fold overlap / UpSet-style view and the `Panel Fold Overlap` export sheet)
 
