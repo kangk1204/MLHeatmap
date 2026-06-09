@@ -44,7 +44,7 @@ PREFILTER_MAX_GENES = 2000
 MAX_PANEL_GENES = 15
 
 
-def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100):
+def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100, random_state: int = 42):
     """Return (clf, use_shap_tree, needs_scaling) for the requested model."""
     model_name = normalize_model_name(model_name)
 
@@ -57,7 +57,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
             max_depth=max_d,
             min_samples_leaf=max(2, n_samples // 10) if n_samples < 30 else max(1, n_samples // 20),
             class_weight="balanced",
-            random_state=42,
+            random_state=random_state,
             n_jobs=-1,
         )
         return clf, True, False
@@ -93,7 +93,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
             colsample_bytree=col_sub,
             reg_alpha=reg_a,
             reg_lambda=reg_l,
-            random_state=42,
+            random_state=random_state,
             n_jobs=-1,
             verbosity=0,
         )
@@ -140,7 +140,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
             reg_alpha=reg_a,
             reg_lambda=reg_l,
             is_unbalance=True,
-            random_state=42,
+            random_state=random_state,
             n_jobs=-1,
             verbose=-1,
         )
@@ -155,7 +155,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
             solver="saga",
             max_iter=2000,
             class_weight="balanced",
-            random_state=42,
+            random_state=random_state,
             n_jobs=-1,
         )
         return clf, False, True
@@ -168,7 +168,7 @@ def _build_model(model_name: str, n_estimators: int = 500, n_samples: int = 100)
             C=1.0,
             class_weight="balanced",
             probability=True,
-            random_state=42,
+            random_state=random_state,
         )
         return clf, False, True
 
@@ -200,7 +200,7 @@ def _feature_importance_vector(clf) -> np.ndarray:
     return np.ones(getattr(clf, "n_features_in_", 1), dtype=np.float64)
 
 
-def _shap_importance_on(clf, X: np.ndarray, use_shap_tree: bool) -> np.ndarray | None:
+def _shap_importance_on(clf, X: np.ndarray, use_shap_tree: bool, random_state: int = 42) -> np.ndarray | None:
     """Mean |SHAP| per feature computed on ``X`` (used for SHAP-based selection).
 
     Returns a length-``X.shape[1]`` vector, or None on failure so the caller can
@@ -217,7 +217,7 @@ def _shap_importance_on(clf, X: np.ndarray, use_shap_tree: bool) -> np.ndarray |
                 explainer = shap.LinearExplainer(clf, X)
             except Exception:
                 bg_size = min(50, len(X))
-                bg_idx = np.random.RandomState(42).choice(len(X), bg_size, replace=False)
+                bg_idx = np.random.RandomState(random_state).choice(len(X), bg_size, replace=False)
                 explainer = shap.KernelExplainer(clf.predict_proba, X[bg_idx])
         shap_values = explainer.shap_values(X)
         if isinstance(shap_values, list):
@@ -273,8 +273,9 @@ def _compute_test_auc(
     n_estimators: int,
     needs_scaling: bool,
     n_classes: int,
+    random_state: int = 42,
 ) -> float:
-    clf, _, _ = _build_model(model, n_estimators, len(y_train))
+    clf, _, _ = _build_model(model, n_estimators, len(y_train), random_state=random_state)
     if needs_scaling:
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
@@ -297,6 +298,7 @@ def _evaluate_prefix_auc_curve(
     needs_scaling: bool,
     n_classes: int,
     cancel_check=None,
+    random_state: int = 42,
 ) -> list[dict[str, float | int | str]]:
     curve = []
     for k in range(1, len(ordered_idx) + 1):
@@ -312,6 +314,7 @@ def _evaluate_prefix_auc_curve(
                 n_estimators=n_estimators,
                 needs_scaling=needs_scaling,
                 n_classes=n_classes,
+                random_state=random_state,
             )
         except Exception:
             score = 0.5
@@ -334,6 +337,7 @@ def _quick_cv_auc(
     n_estimators: int,
     needs_scaling: bool,
     cv,
+    random_state: int = 42,
 ) -> float:
     if cv is None:
         return 0.5
@@ -350,6 +354,7 @@ def _quick_cv_auc(
                 n_estimators=quick_n,
                 needs_scaling=needs_scaling,
                 n_classes=n_classes,
+                random_state=random_state,
             )
         except Exception:
             continue
@@ -378,6 +383,7 @@ def _build_inner_auc_curve(
     needs_scaling: bool,
     n_splits: int,
     cancel_check=None,
+    random_state: int = 42,
 ) -> tuple[list[dict[str, float | int | str]], int]:
     n_classes = len(np.unique(y))
     inner_cv = _make_inner_cv(y, n_splits)
@@ -397,6 +403,7 @@ def _build_inner_auc_curve(
                 n_estimators=n_estimators,
                 needs_scaling=needs_scaling,
                 cv=inner_cv,
+                random_state=random_state,
             )
         except Exception:
             mean_auc = 0.5
@@ -424,6 +431,7 @@ def _forward_order(
     n_splits: int,
     max_genes: int,
     cancel_check=None,
+    random_state: int = 42,
 ) -> list[int]:
     n_classes = len(np.unique(y))
     inner_cv = _make_inner_cv(y, n_splits)
@@ -449,6 +457,7 @@ def _forward_order(
                     n_estimators=n_estimators,
                     needs_scaling=needs_scaling,
                     cv=inner_cv,
+                    random_state=random_state,
                 )
             except Exception:
                 continue
@@ -637,6 +646,7 @@ def _panel_selection_order(
     n_splits: int,
     max_genes: int,
     cancel_check=None,
+    random_state: int = 42,
 ) -> dict[str, object]:
     if panel_method == "lasso":
         ordered_idx = _lasso_order(X_all, y, candidate_idx, max_genes=max_genes, cancel_check=cancel_check)
@@ -658,6 +668,7 @@ def _panel_selection_order(
             n_splits=n_splits,
             max_genes=max_genes,
             cancel_check=cancel_check,
+            random_state=random_state,
         )
         method = "forward"
 
@@ -671,6 +682,7 @@ def _panel_selection_order(
         needs_scaling=needs_scaling,
         n_splits=n_splits,
         cancel_check=cancel_check,
+        random_state=random_state,
     )
     return {
         "ordered_idx": ordered_idx,
@@ -760,7 +772,7 @@ def _aggregate_panel_summary(
     # used for fold-overlap / UpSet visualization and export.
     fold_panels = [
         {
-            "fold": fold_i + 1,
+            "fold": int(panel.get("fold", fold_i + 1)),
             "genes": [gene_names[gene_idx] for gene_idx in list(panel["ordered_idx"])[:best_n]],
         }
         for fold_i, panel in enumerate(panel_orders)
@@ -820,6 +832,14 @@ def run_biomarker_analysis(
     ``"shap"`` uses mean |SHAP| computed on the *training* split. SHAP is always
     computed on held-out samples for the displayed/exported ranking regardless of
     this setting.
+
+    Reproducibility
+    ---------------
+    ``random_state`` seeds the outer cross-validation fold composition and every
+    per-fold model fit (and the SHAP background sampling). The default of 42
+    reproduces the original results exactly. The L1/stability/mRMR panel-selection
+    internals and the inner panel-sizing cross-validation use fixed seeds by design
+    so that, given a training fold, panel selection is deterministic.
     """
     raise_if_cancelled(cancel_check)
     if selection_basis not in ("importance", "shap"):
@@ -878,6 +898,7 @@ def run_biomarker_analysis(
         )
     shap_fallback_used = False
     shap_fallback_folds: list[int] = []
+    shap_selection_fallback_folds: list[int] = []
 
     fold_importances = np.zeros(n_all_genes, dtype=np.float64)
     fold_shap_abs_sum = np.zeros(n_all_genes, dtype=np.float64)
@@ -921,7 +942,7 @@ def run_biomarker_analysis(
         X_train = X_train_all[:, fold_var_idx]
         X_test = X_test_all[:, fold_var_idx]
 
-        clf, _, _ = _build_model(model, n_estimators, len(y_train))
+        clf, _, _ = _build_model(model, n_estimators, len(y_train), random_state=random_state)
         if needs_scaling:
             scaler = StandardScaler()
             X_train = scaler.fit_transform(X_train)
@@ -937,13 +958,15 @@ def run_biomarker_analysis(
         # training split (no held-out leakage). Falls back to importance on error.
         selection_fi = this_fi
         if selection_basis == "shap":
-            shap_fi = _shap_importance_on(clf, X_train, use_shap_tree)
+            shap_fi = _shap_importance_on(clf, X_train, use_shap_tree, random_state=random_state)
             if shap_fi is not None and shap_fi.shape == this_fi.shape:
                 selection_fi = shap_fi
+            else:
+                shap_selection_fallback_folds.append(fold_i + 1)
 
         fold_topn_local = np.argsort(selection_fi)[-n_top_genes:]
         try:
-            clf_topn, _, _ = _build_model(model, min(100, n_estimators), len(y_train))
+            clf_topn, _, _ = _build_model(model, min(100, n_estimators), len(y_train), random_state=random_state)
             X_tr_topn = X_train_all[:, fold_var_idx[fold_topn_local]]
             X_te_topn = X_test_all[:, fold_var_idx[fold_topn_local]]
             if needs_scaling:
@@ -978,7 +1001,7 @@ def run_biomarker_analysis(
                     explainer = shap.LinearExplainer(clf, X_train)
                 except Exception:
                     bg_size = min(50, len(X_train))
-                    bg_idx = np.random.RandomState(42).choice(len(X_train), bg_size, replace=False)
+                    bg_idx = np.random.RandomState(random_state).choice(len(X_train), bg_size, replace=False)
                     explainer = shap.KernelExplainer(clf.predict_proba, X_train[bg_idx])
 
             shap_values_fold = explainer.shap_values(X_test)
@@ -1021,6 +1044,7 @@ def run_biomarker_analysis(
                 n_splits=n_splits,
                 max_genes=max_panel_genes,
                 cancel_check=cancel_check,
+                random_state=random_state,
             )
             ordered_idx = list(panel_result["ordered_idx"])
             if ordered_idx:
@@ -1036,7 +1060,9 @@ def run_biomarker_analysis(
                     needs_scaling=needs_scaling,
                     n_classes=n_classes,
                     cancel_check=cancel_check,
+                    random_state=random_state,
                 )
+                panel_result["fold"] = fold_i + 1
                 panel_orders.append(panel_result)
                 selection_curves.append(list(panel_result["inner_auc_curve"]))
                 heldout_curves.append(heldout_curve)
@@ -1096,6 +1122,12 @@ def run_biomarker_analysis(
             "One or more ROC summaries could not be computed from the fold-specific top-gene model. "
             f"Skipped {skipped}."
         )
+    if selection_basis == "shap" and shap_selection_fallback_folds:
+        folds = ", ".join(str(f) for f in shap_selection_fallback_folds)
+        warnings.append(
+            "SHAP-based candidate ranking could not be computed for fold(s) "
+            f"{folds}; native model feature importance was used for candidate selection there."
+        )
 
     top_genes = [
         {
@@ -1134,6 +1166,7 @@ def run_biomarker_analysis(
         "cv_folds_used": n_splits,
         "shap_fallback_used": shap_fallback_used,
         "shap_fallback_folds": shap_fallback_folds,
+        "shap_selection_fallback_folds": shap_selection_fallback_folds,
         "warnings": warnings,
         "panel_size_cap_genes": max_panel_genes,
         "performance_scope": {
