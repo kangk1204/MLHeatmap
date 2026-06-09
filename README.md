@@ -285,6 +285,14 @@ Practical note:
 
 ## Methodology And Limitations
 
+### Reproducibility and computational environment
+
+The CRC-CMS results are deterministic given a fixed environment and the default seed (`random_state=42`): rebuilding the cohort with `mlheatmap-download-crc-cms` and rerunning the workflow returns the same accuracy, AUCs, and compact gene panel. The public source matrices (UCSC Xena, CRCSC labels, Gencode v36) are immutable snapshots, so the 511-tumor cohort itself is reproducible. Across major `scikit-learn`/`numpy` releases, 3rd-decimal AUCs and one or two panel genes can shift; pin the tested environment for an exact match.
+
+- Tested environment: Python 3.12, `scikit-learn` 1.9.0, `numpy` 2.4.6, `scipy` 1.17.1, `pandas` 3.0.3, `shap` 0.52.0, `xgboost` 3.2.0, `lightgbm` 4.6.0. These are pinned in `requirements-lock.txt` — run `pip install -r requirements-lock.txt` before `pip install .` to match.
+- For an environment-independent exact reproduction, build and run the bundled **Docker** image (see below), which installs the pinned versions.
+- Every exported workbook records the package versions used (in the `Metadata` sheet), so any result can be traced to its environment.
+
 ### Intended data type and scope
 
 MLHeatmap is designed for **bulk RNA-seq count matrices** (integer counts; gene IDs in the first column, samples in the header). The normalization methods below assume count data.

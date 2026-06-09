@@ -1,0 +1,30 @@
+# Pinned, tested environment for exact reproducibility of the manuscript results.
+#
+# The reported CRC-CMS numbers (accuracy, AUCs, and the compact gene panel) are
+# deterministic given this environment and the default seed (random_state=42).
+# For an exact reproduction:
+#   python -m venv .venv && . .venv/bin/activate   (Windows: .venv\Scripts\activate)
+#   pip install -r requirements-lock.txt
+#   pip install .            # or: pip install ".[full]" for XGBoost/LightGBM
+# or use the bundled Dockerfile, which builds this pinned environment.
+#
+# Library versions can affect 3rd-decimal AUCs and 1-2 panel genes across major
+# scikit-learn / numpy releases; pin to these versions to match the manuscript.
+#
+# Tested on CPython 3.12.13.
+
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.0.3
+scikit-learn==1.9.0
+shap==0.52.0
+openpyxl==3.1.5
+matplotlib==3.10.9
+seaborn==0.13.2
+fastapi==0.136.3
+uvicorn==0.49.0
+python-multipart>=0.0.6
+
+# Optional full model set ([full] extra)
+xgboost==3.2.0
+lightgbm==4.6.0
