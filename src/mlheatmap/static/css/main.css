@@ -1338,6 +1338,55 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-secondary);
 }
 
+.progress-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-row .progress-text {
+    margin: 0;
+    flex: 1;
+}
+
+.progress-eta {
+    font-size: 11px;
+    color: var(--text-tertiary, #64748b);
+    white-space: nowrap;
+}
+
+.btn-stop {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.btn-stop:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.preset-group {
+    min-width: 240px;
+}
+
+.preset-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.preset-row .select-input {
+    flex: 1;
+    min-width: 120px;
+}
+
+#fold-overlap-table {
+    margin-top: 12px;
+}
+
+#norm-input-notice {
+    margin: 4px 0 16px;
+}
+
 .results-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

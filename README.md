@@ -283,6 +283,13 @@ Practical note:
 
 ## Methodology And Limitations
 
+### Intended data type and scope
+
+MLHeatmap is designed for **bulk RNA-seq count matrices** (integer counts; gene IDs in the first column, samples in the header). The normalization methods below assume count data.
+
+- **Microarray / already-normalized (log-scale) data are out of scope for the count-oriented transforms.** Such data must be preprocessed separately (probe-to-gene summarization and array-appropriate normalization) before they are used. In the manuscript case study, the Affymetrix GPL570 microarray cohort (GSE39582) is treated as an **independent external-validation** step: the compact panel learned from the TCGA RNA-seq counts is transferred to the microarray cohort after per-cohort gene-level z-scoring, not used as a direct upload to the count workflow.
+- The upload/normalize panels show this guidance, and uploading non-count (e.g. negative or already-log-scaled) values is not supported by the DESeq2-like / CPM transforms.
+
 ### Normalization
 
 - `DESeq2-like VST`: median-of-ratios normalization with a VST-style transform
@@ -291,12 +298,24 @@ Practical note:
 
 `DESeq2-like VST` is a normalization label only. It is not the DESeq2 differential-expression test.
 
+Why a DESeq2-like VST as the default: median-of-ratios size factors with a variance-stabilizing transform are a widely used, robust default for between-sample comparability and for variance-based feature work on RNA-seq counts, and they keep the in-app workflow self-contained (no external R/DESeq2 dependency). `TPM/CPM + log2` and `log2(count + 1)` are provided for users who prefer length- or library-size scaling or a direct log transform. Specialized count normalizations (e.g. TCC, Cosbin, TMM, or the exact DESeq2 VST) target differential-expression calibration rather than the panel-discovery task here; the **Fold-isolated** normalization option (above) addresses the cross-validation leakage concern directly within whichever method is selected.
+
 ### Biomarker analysis
 
-- SHAP ranking and ROC curves are computed with outer-fold held-out evaluation
-- Compact panel selection (`forward`, `lasso`, `stability`, `mrmr`) now uses nested outer CV
+- Compact panel selection (`forward`, `lasso`, `stability`, `mrmr`) uses nested outer CV
+- The fold-local ROC top-N model and the compact-panel candidate pool are ranked by **model-based feature importance** (impurity for tree models, mean absolute coefficients for linear models). **SHAP** values are computed separately on held-out outer-fold samples and drive the *displayed/exported* top-gene ranking and the SHAP heatmap. You can switch the candidate ranking to SHAP with the **Candidate Ranking** control (`selection_basis = importance | shap`); both give concordant panels in our CRC-CMS case study.
 - `optimal_combo.best_auc` is the mean held-out AUC from the outer folds
-- `optimal_combo.selection_frequency` reports how often each consensus panel gene was selected across folds
+- `optimal_combo.selection_frequency` reports how often each consensus panel gene was selected across folds, and `optimal_combo.fold_panels` lists each fold's selected panel (used for the cross-fold overlap / UpSet-style view and the `Panel Fold Overlap` export sheet)
+
+Normalization scope (information leakage):
+
+- By default, normalization is applied once to the full cohort before cross-validation, as an unsupervised preprocessing step (variance filtering, model fitting, SHAP ranking, and panel selection remain strictly inside each training fold).
+- The **Normalization Scope** control offers a **Fold-isolated** mode that re-fits the DESeq2-like size-factor reference and VST dispersion inside each outer-CV training split only, then applies them to the held-out fold. In our CRC-CMS case study the two scopes give statistically indistinguishable performance, confirming the global step does not bias the reported metrics; fold-isolated mode is available for users who want a leakage-free guarantee by construction.
+
+Run controls:
+
+- A **Stop** button cancels a running analysis; the progress bar shows elapsed time and an estimated time remaining.
+- Analysis settings can be saved/loaded as named **Presets** (stored in your browser) so the same configuration can be reused across datasets.
 
 Interpretation notes:
 

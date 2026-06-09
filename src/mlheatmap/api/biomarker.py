@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import traceback
 from typing import Any
 
@@ -72,7 +73,9 @@ def _build_sample_groups_from_parts(
     return sample_groups, None
 
 
-def _snapshot_biomarker_inputs(session) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+def _snapshot_biomarker_inputs(
+    session, *, include_raw: bool = False
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
     with session.state_lock:
         if session.normalized is None:
             return None, JSONResponse({"error": "No normalized data"}, status_code=404)
@@ -84,11 +87,23 @@ def _snapshot_biomarker_inputs(session) -> tuple[dict[str, Any] | None, JSONResp
         if validation_error:
             return None, JSONResponse({"error": validation_error}, status_code=400)
 
+        raw_counts = None
+        if include_raw:
+            source_df = session.mapped_counts if session.mapped_counts is not None else session.raw_counts
+            if source_df is None:
+                return None, JSONResponse(
+                    {"error": "Raw counts are unavailable for fold-isolated normalization."},
+                    status_code=400,
+                )
+            raw_counts = source_df.to_numpy(dtype=np.float64, copy=True)
+
         return {
             "analysis_revision": session.analysis_revision,
             "expression": session.normalized,
             "gene_names": list(session.gene_names),
             "sample_groups": sample_groups,
+            "raw_counts": raw_counts,
+            "norm_method": session.norm_method or "deseq2",
         }, None
 
 
@@ -197,6 +212,8 @@ async def biomarker_stream(
     cv_folds: int = Query(5, ge=2, le=10),
     model: str = Query("rf"),
     panel_method: str = Query("forward"),
+    per_fold_normalize: bool = Query(False),
+    selection_basis: str = Query("importance"),
 ):
     """Run biomarker analysis with SSE progress streaming."""
     lease, error, normalized_session_id = acquire_session_lease_or_error(request, session_id)
@@ -204,7 +221,15 @@ async def biomarker_stream(
         return error
     session = lease.session
 
-    snapshot, snapshot_error = _snapshot_biomarker_inputs(session)
+    selection_basis = (selection_basis or "importance").strip().lower()
+    if selection_basis not in ("importance", "shap"):
+        request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
+        return JSONResponse(
+            {"error": f"Unknown selection_basis: {selection_basis}. Choose 'importance' or 'shap'."},
+            status_code=400,
+        )
+
+    snapshot, snapshot_error = _snapshot_biomarker_inputs(session, include_raw=per_fold_normalize)
     if snapshot_error is not None:
         request.app.state.sessions.end_use(lease.session_id, lease.operation_id)
         return snapshot_error
@@ -234,11 +259,21 @@ async def biomarker_stream(
     async def event_generator():
         progress_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        start_time = time.monotonic()
 
         def progress_callback(step, pct, msg):
+            elapsed = time.monotonic() - start_time
+            # Rough remaining-time estimate from progress so far (drives the UI ETA).
+            eta = (elapsed * (100 - pct) / pct) if pct and pct > 0 else None
             loop.call_soon_threadsafe(
                 progress_queue.put_nowait,
-                {"step": step, "pct": pct, "msg": msg},
+                {
+                    "step": step,
+                    "pct": pct,
+                    "msg": msg,
+                    "elapsed_s": round(elapsed, 1),
+                    "eta_s": round(eta, 1) if eta is not None else None,
+                },
             )
 
         from mlheatmap.core.biomarker import run_biomarker_analysis
@@ -256,6 +291,10 @@ async def biomarker_stream(
                 panel_method=panel_method,
                 progress_callback=progress_callback,
                 cancel_check=lease.cancel_event.is_set,
+                raw_counts=snapshot.get("raw_counts"),
+                norm_method=snapshot.get("norm_method", "deseq2"),
+                per_fold_normalize=per_fold_normalize,
+                selection_basis=selection_basis,
             ),
         )
 
@@ -293,6 +332,9 @@ async def biomarker_stream(
                     "panel_method": panel_method,
                     "n_top_genes": n_top_genes,
                     "n_estimators": n_estimators,
+                    "per_fold_normalize": per_fold_normalize,
+                    "normalization_scope": result.get("normalization_scope", "global"),
+                    "selection_basis": result.get("selection_basis", selection_basis),
                     "cv_folds_requested": result.get("cv_folds_requested", cv_folds),
                     "cv_folds_used": result.get(
                         "cv_folds_used",

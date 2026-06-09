@@ -8,10 +8,21 @@ const Biomarker = {
     _degAbortController: null,
     VOLCANO_NS_RASTER_THRESHOLD: 4000,
 
+    PRESET_KEY: 'mlheatmap_biomarker_presets',
+
     _escapeHtml(str) {
         const div = document.createElement('div');
         div.textContent = str ?? '';
         return div.innerHTML;
+    },
+
+    _formatDuration(seconds) {
+        const s = Math.max(0, Math.round(seconds || 0));
+        if (s < 60) return `${s}s`;
+        const m = Math.floor(s / 60);
+        if (m < 60) return `${m}m ${s % 60}s`;
+        const h = Math.floor(m / 60);
+        return `${h}h ${m % 60}m`;
     },
 
     _hexToRgba(hex, opacity) {
@@ -111,8 +122,174 @@ const Biomarker = {
         if (hadDegRequest) App.hideLoading();
     },
 
+    stopRun() {
+        const stopBtn = document.getElementById('btn-stop-biomarker');
+        if (stopBtn) stopBtn.disabled = true;
+        const progressText = document.getElementById('progress-text');
+        if (progressText) progressText.textContent = 'Stopping…';
+        this.cancelPending();
+        App.showToast('Analysis stopped', 'info');
+    },
+
+    // ----- Settings presets (saved in the browser via localStorage) -----
+    _initPresets() {
+        const saveBtn = document.getElementById('btn-save-preset');
+        const delBtn = document.getElementById('btn-delete-preset');
+        const sel = document.getElementById('preset-select');
+        if (saveBtn) saveBtn.addEventListener('click', () => this._savePreset());
+        if (delBtn) delBtn.addEventListener('click', () => this._deletePreset());
+        if (sel) sel.addEventListener('change', () => this._applyPreset(sel.value));
+        this._refreshPresetDropdown();
+    },
+
+    _loadPresets() {
+        try { return JSON.parse(localStorage.getItem(this.PRESET_KEY)) || {}; }
+        catch { return {}; }
+    },
+
+    _storePresets(presets) {
+        try { localStorage.setItem(this.PRESET_KEY, JSON.stringify(presets)); } catch { /* ignore */ }
+    },
+
+    _collectSettings() {
+        const val = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
+        return {
+            model: val('model-select'),
+            panelMethod: val('panel-method-select'),
+            nTopGenes: val('n-top-genes'),
+            nEstimators: val('n-estimators'),
+            cvFolds: val('cv-folds'),
+            normScope: val('norm-scope-select'),
+            selectionBasis: val('selection-basis-select'),
+        };
+    },
+
+    _applySettings(settings) {
+        if (!settings) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+        set('model-select', settings.model);
+        set('panel-method-select', settings.panelMethod);
+        set('n-top-genes', settings.nTopGenes);
+        set('n-estimators', settings.nEstimators);
+        set('cv-folds', settings.cvFolds);
+        set('norm-scope-select', settings.normScope);
+        set('selection-basis-select', settings.selectionBasis);
+        this._updateModelParams();
+    },
+
+    _refreshPresetDropdown(selected) {
+        const sel = document.getElementById('preset-select');
+        if (!sel) return;
+        const presets = this._loadPresets();
+        const names = Object.keys(presets).sort();
+        sel.innerHTML = '<option value="">— Saved presets —</option>';
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            sel.appendChild(opt);
+        });
+        if (selected && presets[selected]) sel.value = selected;
+    },
+
+    _savePreset() {
+        const name = (window.prompt('Save current biomarker settings as preset named:') || '').trim();
+        if (!name) return;
+        const presets = this._loadPresets();
+        presets[name] = this._collectSettings();
+        this._storePresets(presets);
+        this._refreshPresetDropdown(name);
+        App.showToast(`Preset "${name}" saved`, 'success');
+    },
+
+    _applyPreset(name) {
+        if (!name) return;
+        const presets = this._loadPresets();
+        if (presets[name]) {
+            this._applySettings(presets[name]);
+            App.showToast(`Preset "${name}" applied`, 'info');
+        }
+    },
+
+    _deletePreset() {
+        const sel = document.getElementById('preset-select');
+        const name = sel ? sel.value : '';
+        if (!name) { App.showToast('Select a preset to delete', 'error'); return; }
+        const presets = this._loadPresets();
+        delete presets[name];
+        this._storePresets(presets);
+        this._refreshPresetDropdown();
+        App.showToast(`Preset "${name}" deleted`, 'info');
+    },
+
+    // ----- Cross-fold panel overlap (selection-stability view) -----
+    renderFoldOverlap(combo) {
+        const card = document.getElementById('fold-overlap-card');
+        const plotEl = document.getElementById('fold-overlap-plot');
+        const descEl = document.getElementById('fold-overlap-desc');
+        const tableEl = document.getElementById('fold-overlap-table');
+        const foldPanels = combo && Array.isArray(combo.fold_panels) ? combo.fold_panels : [];
+        if (!card || !plotEl || foldPanels.length === 0) {
+            if (card) card.classList.add('hidden');
+            return;
+        }
+        card.classList.remove('hidden');
+
+        const nFolds = foldPanels.length;
+        const geneFolds = {};
+        foldPanels.forEach(fp => (fp.genes || []).forEach(g => {
+            (geneFolds[g] = geneFolds[g] || new Set()).add(fp.fold);
+        }));
+        const genes = Object.keys(geneFolds).sort(
+            (a, b) => geneFolds[b].size - geneFolds[a].size || a.localeCompare(b),
+        );
+        const foldLabels = foldPanels.map(fp => `Fold ${fp.fold}`);
+        const z = genes.map(g => foldPanels.map(fp => (geneFolds[g].has(fp.fold) ? 1 : 0)));
+        const nCore = genes.filter(g => geneFolds[g].size === nFolds).length;
+
+        if (descEl) {
+            descEl.textContent = `Genes chosen by the fold-local panels across the ${nFolds} outer CV folds. `
+                + `${nCore} gene${nCore === 1 ? '' : 's'} recurred in every fold; `
+                + `${genes.length} appeared in at least one fold. Recurrence reflects selection stability `
+                + `(an UpSet-style view of fold membership).`;
+        }
+
+        const trace = {
+            z, x: foldLabels, y: genes, type: 'heatmap',
+            colorscale: [[0, 'rgba(148,163,184,0.10)'], [1, '#8b5cf6']],
+            showscale: false, xgap: 2, ygap: 1,
+            hovertemplate: '%{y} — %{x}: %{z}<extra></extra>',
+        };
+        const layout = {
+            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter, sans-serif', color: '#94a3b8', size: 11 },
+            xaxis: { side: 'top', tickfont: { size: 11 } },
+            yaxis: { autorange: 'reversed', tickfont: { size: 10 } },
+            margin: { l: 120, r: 20, t: 28, b: 16 },
+            height: Math.max(220, genes.length * 18 + 60),
+        };
+        Plotly.newPlot('fold-overlap-plot', [trace], layout, { responsive: true, displayModeBar: false });
+
+        if (tableEl) {
+            const freq = Array.isArray(combo.selection_frequency) ? combo.selection_frequency : [];
+            const rows = genes.map(g => {
+                const info = freq.find(item => item.gene === g);
+                const pct = info ? `${(info.frequency * 100).toFixed(0)}%`
+                    : `${Math.round((geneFolds[g].size / nFolds) * 100)}%`;
+                const meanRank = info && info.mean_rank != null ? info.mean_rank.toFixed(1) : '—';
+                return `<tr><td style="font-weight:600">${this._escapeHtml(g)}</td>`
+                    + `<td>${geneFolds[g].size}/${nFolds}</td><td>${pct}</td><td>${meanRank}</td></tr>`;
+            }).join('');
+            tableEl.innerHTML = '<table><thead><tr><th>Gene</th><th>Folds</th>'
+                + '<th>Frequency</th><th>Mean rank</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        }
+    },
+
     init() {
         document.getElementById('btn-run-biomarker').addEventListener('click', () => this.run());
+        const stopBtn = document.getElementById('btn-stop-biomarker');
+        if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
+        this._initPresets();
         document.getElementById('btn-to-export').addEventListener('click', () => {
             App.goToPanel('heatmap');
             Heatmap.renderShapHeatmap();
@@ -276,6 +453,17 @@ const Biomarker = {
 
         const modelSelect = document.getElementById('model-select');
         const panelSelect = document.getElementById('panel-method-select');
+        const normScopeSelect = document.getElementById('norm-scope-select');
+        const selectionBasisSelect = document.getElementById('selection-basis-select');
+        const perFoldNormalize = normScopeSelect ? normScopeSelect.value === 'per_fold' : false;
+        const selectionBasis = selectionBasisSelect ? selectionBasisSelect.value : 'importance';
+
+        const etaEl = document.getElementById('progress-eta');
+        if (etaEl) etaEl.textContent = '';
+        const stopBtn = document.getElementById('btn-stop-biomarker');
+        if (stopBtn) stopBtn.disabled = false;
+        progressText.textContent = 'Preparing...';
+
         const runToken = ++this._mlRunToken;
         if (this._activeStream) this._activeStream.close();
         const es = API.biomarkerStream(App.state.sessionId, {
@@ -284,6 +472,8 @@ const Biomarker = {
             cvFolds,
             model: modelSelect ? modelSelect.value : 'rf',
             panelMethod: panelSelect ? panelSelect.value : 'forward',
+            perFoldNormalize,
+            selectionBasis,
         });
         this._activeStream = es;
 
@@ -304,6 +494,15 @@ const Biomarker = {
             const data = JSON.parse(e.data);
             progressFill.style.width = data.pct + '%';
             progressText.textContent = data.msg;
+            const etaEl = document.getElementById('progress-eta');
+            if (etaEl) {
+                const parts = [];
+                if (typeof data.elapsed_s === 'number') parts.push(`elapsed ${this._formatDuration(data.elapsed_s)}`);
+                if (typeof data.eta_s === 'number' && data.pct > 0 && data.pct < 100) {
+                    parts.push(`~${this._formatDuration(data.eta_s)} left`);
+                }
+                etaEl.textContent = parts.join(' · ');
+            }
         });
 
         es.addEventListener('complete', (e) => {
@@ -398,6 +597,9 @@ const Biomarker = {
 
         // Optimal combination
         if (data.optimal_combo) this.showOptimalCombo(data.optimal_combo);
+
+        // Cross-fold panel overlap (UpSet-style selection-stability view)
+        this.renderFoldOverlap(data.optimal_combo);
 
         // Table
         this.populateTable(data.top_genes);

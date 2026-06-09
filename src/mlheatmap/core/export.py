@@ -77,6 +77,29 @@ def _write_results_workbook(writer, session, include_normalized_expression: bool
                 sheet_name="Panel Consensus",
                 index=False,
             )
+            fold_panels = optimal_combo.get("fold_panels", [])
+            if fold_panels:
+                ordered_genes: list[str] = []
+                for fold_panel in fold_panels:
+                    for gene in fold_panel.get("genes", []):
+                        if gene not in ordered_genes:
+                            ordered_genes.append(gene)
+                overlap_rows = []
+                for gene in ordered_genes:
+                    row: dict[str, Any] = {"gene": gene}
+                    selected_count = 0
+                    for fold_panel in fold_panels:
+                        in_fold = int(gene in fold_panel.get("genes", []))
+                        row[f"fold{fold_panel.get('fold')}"] = in_fold
+                        selected_count += in_fold
+                    row["n_folds_selected"] = selected_count
+                    overlap_rows.append(row)
+                overlap_df = pd.DataFrame(overlap_rows)
+                if not overlap_df.empty:
+                    overlap_df = overlap_df.sort_values(
+                        "n_folds_selected", ascending=False, kind="stable"
+                    )
+                overlap_df.to_excel(writer, sheet_name="Panel Fold Overlap", index=False)
 
     if session.deg_results:
         deg_data = session.deg_results["results"]
