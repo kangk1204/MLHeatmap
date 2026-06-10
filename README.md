@@ -251,6 +251,8 @@ Expected generated files:
 
 Expected result (for reproducibility checks): the rebuilt matrix has **511 primary-tumor samples** (gene-symbol rows) with CMS distribution **76 CMS1, 220 CMS2, 72 CMS3, 143 CMS4** (see `tcga_crc_cms_gold_labels.json`). If your numbers differ, check that primary-tumor filtering (TCGA sample type `01`) and the CRCSC gold labels (NOLBL excluded) were applied.
 
+The rebuild is **deterministic and independent of source column/row order**: each public source file is verified against a pinned `sha256` (`EXPECTED_SOURCE_SHA256`), multiple primary-tumor aliquots per patient are resolved by sorted barcode, duplicate gene symbols are summed, and samples/genes are written in a canonical sorted order. The resulting cohort is byte-stable; its `sha256` is recorded as `cohort_sha256` in `tcga_crc_cms_gold_labels.json` so a rebuild on any machine yields the same matrix and therefore the same cross-validated metrics.
+
 Download sources:
 
 - TCGA COAD STAR counts: [TCGA-COAD.star_counts.tsv.gz](https://gdc.xenahubs.net/download/TCGA-COAD.star_counts.tsv.gz)
@@ -287,7 +289,7 @@ Practical note:
 
 ### Reproducibility and computational environment
 
-The CRC-CMS results are deterministic given a fixed environment and the default seed (`random_state=42`): rebuilding the cohort with `mlheatmap-download-crc-cms` and rerunning the workflow returns the same accuracy, AUCs, and compact gene panel. The public source matrices (UCSC Xena, CRCSC labels, Gencode v36) are immutable snapshots, so the 511-tumor cohort itself is reproducible. Across major `scikit-learn`/`numpy` releases, 3rd-decimal AUCs and one or two panel genes can shift; pin the tested environment for an exact match.
+The CRC-CMS results are deterministic given a fixed environment and the default seed (`random_state=42`): rebuilding the cohort with `mlheatmap-download-crc-cms` and rerunning the workflow returns the same accuracy, AUCs, and compact gene panel. The public source files (UCSC Xena, CRCSC labels, Gencode v36) are mutable URLs, so the rebuild pins and verifies each one by `sha256` and writes the cohort in a canonical order; the resulting 511-tumor matrix is byte-stable (its `cohort_sha256` is recorded) and the cohort is therefore reproducible against those pinned snapshots. Across major `scikit-learn`/`numpy` releases, 3rd-decimal AUCs and one or two panel genes can shift; pin the tested environment for an exact match.
 
 - Tested environment: Python 3.12, `scikit-learn` 1.9.0, `numpy` 2.4.6, `scipy` 1.17.1, `pandas` 3.0.3, `shap` 0.52.0, `xgboost` 3.2.0, `lightgbm` 4.6.0. These are pinned in `requirements-lock.txt` — run `pip install -r requirements-lock.txt` before `pip install .` to match.
 - For an environment-independent exact reproduction, build and run the bundled **Docker** image (see below), which installs the pinned versions.

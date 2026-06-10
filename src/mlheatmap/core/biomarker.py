@@ -699,9 +699,15 @@ def _aggregate_panel_summary(
     gene_names: list[str],
     *,
     method: str,
+    n_splits: int | None = None,
 ) -> dict[str, object] | None:
     if not panel_orders:
         return None
+
+    # Recurrence is reported over the number of CV folds, not just the folds that
+    # produced a panel, so a dropped (empty-panel) fold lowers rather than inflates
+    # apparent selection stability.
+    denom = n_splits if n_splits else len(panel_orders)
 
     max_k = max(len(curve) for curve in heldout_curves)
     heldout_by_k = {k: [] for k in range(1, max_k + 1)}
@@ -753,7 +759,7 @@ def _aggregate_panel_summary(
     ranked_consensus = sorted(
         selected_gene_stats.items(),
         key=lambda item: (
-            -item[1]["count"] / len(panel_orders),
+            -item[1]["count"] / denom,
             item[1]["rank_sum"] / item[1]["count"],
             item[0],
         ),
@@ -762,7 +768,7 @@ def _aggregate_panel_summary(
     selection_frequency = [
         {
             "gene": gene,
-            "frequency": round(stats["count"] / len(panel_orders), 4),
+            "frequency": round(stats["count"] / denom, 4),
             "mean_rank": round(stats["rank_sum"] / stats["count"], 4),
         }
         for gene, stats in ranked_consensus
@@ -791,6 +797,7 @@ def _aggregate_panel_summary(
         "selection_frequency": selection_frequency,
         "fold_panels": fold_panels,
         "n_folds": len(panel_orders),
+        "n_cv_folds": denom,
     }
 
 
@@ -899,6 +906,7 @@ def run_biomarker_analysis(
     shap_fallback_used = False
     shap_fallback_folds: list[int] = []
     shap_selection_fallback_folds: list[int] = []
+    panel_skipped_folds: list[int] = []
 
     fold_importances = np.zeros(n_all_genes, dtype=np.float64)
     fold_shap_abs_sum = np.zeros(n_all_genes, dtype=np.float64)
@@ -1066,6 +1074,8 @@ def run_biomarker_analysis(
                 panel_orders.append(panel_result)
                 selection_curves.append(list(panel_result["inner_auc_curve"]))
                 heldout_curves.append(heldout_curve)
+            else:
+                panel_skipped_folds.append(fold_i + 1)
 
     avg_importances = fold_importances / n_splits
     avg_shap_mean = fold_shap_abs_sum / np.maximum(fold_shap_counts, 1.0)
@@ -1108,6 +1118,7 @@ def run_biomarker_analysis(
         heldout_curves,
         all_gene_names,
         method=panel_method,
+        n_splits=n_splits,
     )
     _progress("complete", 100, "Analysis complete")
 
@@ -1127,6 +1138,13 @@ def run_biomarker_analysis(
         warnings.append(
             "SHAP-based candidate ranking could not be computed for fold(s) "
             f"{folds}; native model feature importance was used for candidate selection there."
+        )
+    if panel_skipped_folds:
+        folds = ", ".join(str(f) for f in panel_skipped_folds)
+        warnings.append(
+            f"No compact panel could be selected for fold(s) {folds}; selection "
+            f"frequencies are reported over all {n_splits} CV folds, so these folds "
+            "lower rather than inflate the reported recurrence."
         )
 
     top_genes = [
@@ -1167,6 +1185,7 @@ def run_biomarker_analysis(
         "shap_fallback_used": shap_fallback_used,
         "shap_fallback_folds": shap_fallback_folds,
         "shap_selection_fallback_folds": shap_selection_fallback_folds,
+        "panel_skipped_folds": panel_skipped_folds,
         "warnings": warnings,
         "panel_size_cap_genes": max_panel_genes,
         "performance_scope": {

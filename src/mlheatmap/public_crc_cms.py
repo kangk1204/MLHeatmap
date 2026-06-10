@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import urllib.request
@@ -39,10 +40,45 @@ DOWNLOAD_SPECS = (
     DownloadSpec("gold_labels", "crcsc_cms_labels_gold_standard.txt", GOLD_LABELS_URL, "CRCSC gold CMS labels"),
 )
 
+# Pinned sha256 of every public source file. The Xena GDC hub and the CRCSC
+# label file are mutable URLs, so the cohort is reproducible only against these
+# exact snapshots; download_file verifies each file (cached or freshly fetched)
+# and fails loudly on any mismatch instead of silently building a different cohort.
+EXPECTED_SOURCE_SHA256 = {
+    "gdc_coad_star_counts.tsv.gz": "f434486ee869efae683c77ebb6376bd7a11e63ec50e8a62479f73c398db35d42",
+    "gdc_read_star_counts.tsv.gz": "48494edbcad75f9478867e069515b3ea0b207dd1f3709cda82e2d6fd4d38f0af",
+    "gencode_v36_probemap.tsv": "f027752d663b1da74f4113998bf008e6ebecfa3732607513e027bb6eb1f635b5",
+    "crcsc_cms_labels_gold_standard.txt": "9ab613c855f0e31dfdcf417fd5c6f4dfb064cb482132855025e7e3eae7a881b1",
+}
+
+
+def sha256_file(path: Path) -> str:
+    """Return the sha256 hex digest of a file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_checksum(spec: DownloadSpec, path: Path) -> None:
+    """Raise if a source file's sha256 does not match the pinned snapshot."""
+    expected = EXPECTED_SOURCE_SHA256.get(spec.filename)
+    if expected is None:
+        return
+    actual = sha256_file(path)
+    if actual != expected:
+        raise ValueError(
+            f"Checksum mismatch for {spec.filename}: expected {expected}, got {actual}. "
+            "The upstream public source has changed; the manuscript cohort is pinned to the "
+            "recorded sha256 snapshots (see EXPECTED_SOURCE_SHA256)."
+        )
+
 
 def download_file(spec: DownloadSpec, destination: Path, *, force: bool = False) -> Path:
-    """Download one public source file unless it is already cached."""
+    """Download one public source file unless it is already cached, verifying its sha256."""
     if destination.exists() and not force:
+        verify_checksum(spec, destination)
         print(f"  [CACHED] {spec.description}")
         return destination
 
@@ -52,6 +88,7 @@ def download_file(spec: DownloadSpec, destination: Path, *, force: bool = False)
     print(f"  Downloading {spec.description}...")
     with urllib.request.urlopen(request, timeout=120) as response, temp_path.open("wb") as handle:
         shutil.copyfileobj(response, handle, length=1024 * 1024)
+    verify_checksum(spec, temp_path)
     temp_path.replace(destination)
     size_mb = destination.stat().st_size / (1024 * 1024)
     print(f"  [OK] {destination.name} ({size_mb:.1f} MB)")
@@ -103,17 +140,26 @@ def remove_summary_rows(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def select_primary_tumor_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep one primary-tumor aliquot per TCGA sample barcode."""
-    selected: dict[str, str] = {}
+    """Keep one primary-tumor aliquot per TCGA sample barcode, deterministically.
+
+    When a patient has more than one primary-tumor aliquot (e.g. ``01A`` and
+    ``01B``), the aliquot is chosen by sorting the full barcodes and taking the
+    first (so ``01A`` < ``01B`` < ``01C``), and the output columns are sorted by
+    the 15-char sample barcode. Both choices are independent of the source column
+    order, so a fresh Xena download that reorders columns yields the same cohort.
+    """
+    candidates: dict[str, list[str]] = {}
     for column in frame.columns:
         parts = str(column).split("-")
         if len(parts) < 4 or parts[3][:2] != "01":
             continue
         short_barcode = str(column)[:15]
-        selected.setdefault(short_barcode, str(column))
+        candidates.setdefault(short_barcode, []).append(str(column))
 
-    trimmed = frame.loc[:, list(selected.values())].copy()
-    trimmed.columns = list(selected.keys())
+    short_barcodes = sorted(candidates)
+    chosen = [sorted(candidates[key])[0] for key in short_barcodes]
+    trimmed = frame.loc[:, chosen].copy()
+    trimmed.columns = short_barcodes
     return trimmed
 
 
@@ -125,20 +171,18 @@ def xena_log2_to_counts(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def map_unique_gene_symbols(frame: pd.DataFrame, ensembl_to_symbol: dict[str, str]) -> pd.DataFrame:
-    """Map Ensembl IDs to gene symbols and keep the first row per unique symbol."""
-    kept_rows: list[str] = []
-    symbols: list[str] = []
-    seen: set[str] = set()
-    for ensembl_id in frame.index:
-        symbol = ensembl_to_symbol.get(str(ensembl_id))
-        if not symbol or symbol in seen:
-            continue
-        kept_rows.append(str(ensembl_id))
-        symbols.append(symbol)
-        seen.add(symbol)
+    """Map Ensembl IDs to gene symbols, summing counts of IDs that share a symbol.
 
-    mapped = frame.loc[kept_rows].copy()
-    mapped.index = symbols
+    Several Ensembl IDs can map to one symbol (paralogous/PAR-region entries).
+    Their integer counts are summed rather than keeping an arbitrary first row,
+    so the per-symbol value is independent of source row order. The output is
+    sorted by symbol for a canonical, reproducible gene order.
+    """
+    symbols = frame.index.to_series().astype(str).map(ensembl_to_symbol.get)
+    mask = symbols.notna() & (symbols.astype(str).str.strip() != "")
+    mapped = frame.loc[mask.to_numpy()].copy()
+    mapped.index = symbols[mask].to_numpy()
+    mapped = mapped.groupby(level=0, sort=True).sum()
     return mapped
 
 
@@ -151,6 +195,14 @@ def apply_low_expression_filter(frame: pd.DataFrame, *, min_count: int = 10, min
 
 def apply_gold_labels(frame: pd.DataFrame, gold_labels: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Keep labeled samples and rename columns for MLHeatmap group auto-detection."""
+    label_counts = gold_labels.groupby("short_barcode")["CMS_gold"].nunique()
+    conflicting = sorted(label_counts[label_counts > 1].index.tolist())
+    if conflicting:
+        raise ValueError(
+            f"Conflicting gold CMS labels for {len(conflicting)} barcode(s): {conflicting}. "
+            "The gold-label source lists a patient with more than one CMS call; "
+            "resolve before building so the assignment is not source-order dependent."
+        )
     label_map = dict(zip(gold_labels["short_barcode"], gold_labels["CMS_gold"]))
     selected_columns: list[str] = []
     renamed_columns: dict[str, str] = {}
@@ -202,18 +254,38 @@ def build_public_crc_cms_example(output_dir: Path, *, force_download: bool = Fal
 
     print("[5/6] Mapping genes and applying manuscript filter...")
     mapped = map_unique_gene_symbols(raw_counts, ensembl_to_symbol)
+    # The low-expression filter is applied across all primary-tumor samples
+    # (its >=20%-of-samples denominator is the full primary-tumor column count,
+    # not the labeled cohort); gold-label subsetting follows. This order is part
+    # of the manuscript workflow and is held fixed for reproducibility.
     filtered = apply_low_expression_filter(mapped)
 
     print("[6/6] Applying CRCSC gold labels and writing outputs...")
     gold_counts, metadata = apply_gold_labels(filtered, gold_labels)
+
+    # Canonical, source-order-independent layout: samples sorted by id, genes by
+    # symbol, so the on-disk order (and thus the downstream CV fold composition)
+    # does not depend on how Xena happens to order its columns/rows.
+    gold_counts = gold_counts.sort_index(axis=0).sort_index(axis=1)
+    metadata = metadata.sort_values("sample_id").reset_index(drop=True)
+
+    cms_distribution = metadata["CMS_gold"].value_counts().sort_index().to_dict()
+    expected_distribution = {"CMS1": 76, "CMS2": 220, "CMS3": 72, "CMS4": 143}
+    n_samples = int(gold_counts.shape[1])
+    if n_samples != 511 or cms_distribution != expected_distribution:
+        raise ValueError(
+            f"Unexpected cohort: {n_samples} samples, distribution {cms_distribution} "
+            f"(expected 511 samples, {expected_distribution}). Source coverage may have drifted."
+        )
+
     counts_path = output_dir / "tcga_crc_cms_gold_counts.tsv.gz"
     metadata_path = output_dir / "tcga_crc_cms_gold_metadata.tsv"
     summary_path = output_dir / "tcga_crc_cms_gold_labels.json"
 
-    gold_counts.to_csv(counts_path, sep="\t", compression="gzip")
+    # mtime=0 makes the gzip byte-deterministic so the cohort sha256 is a stable anchor.
+    gold_counts.to_csv(counts_path, sep="\t", compression={"method": "gzip", "mtime": 0})
     metadata.to_csv(metadata_path, sep="\t", index=False)
 
-    cms_distribution = metadata["CMS_gold"].value_counts().sort_index().to_dict()
     summary = {
         "dataset": "TCGA COAD + READ",
         "source": "UCSC Xena GDC hub",
@@ -221,9 +293,11 @@ def build_public_crc_cms_example(output_dir: Path, *, force_download: bool = Fal
         "reverse_transform": "round(2^x - 1)",
         "gold_label_source": GOLD_LABELS_URL,
         "gold_label_column": GOLD_LABELS_COLUMN,
-        "n_samples": int(gold_counts.shape[1]),
+        "n_samples": n_samples,
         "n_genes": int(gold_counts.shape[0]),
         "cms_distribution": {key: int(value) for key, value in cms_distribution.items()},
+        "source_sha256": dict(EXPECTED_SOURCE_SHA256),
+        "cohort_sha256": sha256_file(counts_path),
         "output_counts": str(counts_path),
         "output_metadata": str(metadata_path),
     }
@@ -232,6 +306,7 @@ def build_public_crc_cms_example(output_dir: Path, *, force_download: bool = Fal
     print(f"  Counts: {counts_path}")
     print(f"  Metadata: {metadata_path}")
     print(f"  Summary: {summary_path}")
+    print(f"  Cohort sha256: {summary['cohort_sha256']}")
     print(f"  Final matrix: {gold_counts.shape[0]} genes x {gold_counts.shape[1]} samples")
     return summary
 
