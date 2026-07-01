@@ -127,6 +127,24 @@ def make_fig_s2(result: dict, out_path: Path):
     plt.close(fig)
 
 
+def crop_panels_a_d(out_a: Path, out_d: Path):
+    """Crop panels A (UI screenshot) and D (20-combination screen) from the
+    original submitted Figure1.png (2208x675); these panels did not change in
+    the revision. Panel D is cropped from x=1470 so its "D" label (originally
+    spanning ~x=1500-1560) is fully included with margin, rather than sliced."""
+    # Crop source is the ORIGINAL submitted Figure1.png (old B/C panels, but the
+    # A UI screenshot and the D 20-combination screen are reused unchanged). A
+    # preserved copy lives beside the analysis outputs so this stays correct even
+    # after the submission-folder Figure1.png is replaced with the new composite.
+    preserved = ANALYSIS_DIR / "Figure1_source_original.png"
+    source = preserved if preserved.exists() else (MANUSCRIPT_DIR / "Figure1.png")
+    original = Image.open(source).convert("RGB")
+    w, h = original.size  # 2208 x 675
+    original.crop((0, 0, 408, h)).save(out_a)
+    original.crop((1470, 0, w, h)).save(out_d)
+    print(f"Cropped panel A [0:408] -> {out_a.name}, panel D [1470:{w}] -> {out_d.name}")
+
+
 def flatten_to_white(im: Image.Image) -> Image.Image:
     """Composite an RGBA image onto an opaque white background (avoids
     alpha-blending artifacts, e.g. thin text disappearing, on later resize)."""
@@ -168,6 +186,8 @@ def composite_figure1(panel_b_path: Path, panel_c_path: Path, out_path: Path):
 def main():
     with (ANALYSIS_DIR / "main_result.json").open() as fh:
         result = json.load(fh)
+
+    crop_panels_a_d(ANALYSIS_DIR / "fig1_panelA.png", ANALYSIS_DIR / "fig1_panelD.png")
 
     panel_b_path = ANALYSIS_DIR / "fig1_panelB_new.png"
     panel_c_path = ANALYSIS_DIR / "fig1_panelC_new.png"
