@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,19 @@ GOLD_LABELS_URL = (
 )
 GOLD_LABELS_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 SUMMARY_PREFIXES = ("N_unmapped", "N_multimapping", "N_noFeature", "N_ambiguous", "__")
+
+# GOLD_LABELS_URL (Sage-Bionetworks/crc-cms-kras) was reachable when this
+# manuscript was first submitted (confirmed live as of 2026-04-08 via the
+# Wayback Machine) but returns HTTP 404 as of this revision (2026-07) - the
+# upstream mirror appears to have been taken down or renamed. To keep
+# `mlheatmap-download-crc-cms` reproducible without depending on that mirror's
+# uptime, we fall back to a small vendored snapshot covering exactly the 511
+# TCGA CMS labels this workflow needs. It was reconstructed from this
+# manuscript's own published Table S1 sample-to-group assignment (itself
+# originally sourced from the live CRCSC file), so it reproduces the identical
+# pinned 511-sample, 4-class cohort.
+VENDORED_GOLD_LABELS_FILENAME = "crcsc_tcga_cms_labels_vendored.tsv"
+VENDORED_GOLD_LABELS_SOURCE = Path(__file__).resolve().parent / "data" / VENDORED_GOLD_LABELS_FILENAME
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,7 @@ EXPECTED_SOURCE_SHA256 = {
     "gdc_read_star_counts.tsv.gz": "48494edbcad75f9478867e069515b3ea0b207dd1f3709cda82e2d6fd4d38f0af",
     "gencode_v36_probemap.tsv": "f027752d663b1da74f4113998bf008e6ebecfa3732607513e027bb6eb1f635b5",
     "crcsc_cms_labels_gold_standard.txt": "9ab613c855f0e31dfdcf417fd5c6f4dfb064cb482132855025e7e3eae7a881b1",
+    VENDORED_GOLD_LABELS_FILENAME: "82f56d39a8c3d426d5a96da4a00cdb1af3b6fd004f66a60de3721a022fbb6685",
 }
 
 
@@ -95,11 +110,44 @@ def download_file(spec: DownloadSpec, destination: Path, *, force: bool = False)
     return destination
 
 
+def resolve_gold_labels(download_dir: Path, *, force: bool = False) -> Path:
+    """Fetch the CRCSC gold-label file, falling back to a vendored snapshot.
+
+    Tries the live upstream mirror first (so a restored/renamed mirror is picked
+    up automatically); if that fails outright (unreachable, 404, etc.), falls
+    back to VENDORED_GOLD_LABELS_SOURCE, a checksummed local copy covering the
+    511 TCGA labels this workflow needs (see module docstring comment above
+    VENDORED_GOLD_LABELS_FILENAME for provenance).
+    """
+    spec = next(s for s in DOWNLOAD_SPECS if s.key == "gold_labels")
+    try:
+        return download_file(spec, download_dir / spec.filename, force=force)
+    except (urllib.error.URLError, OSError) as exc:
+        expected = EXPECTED_SOURCE_SHA256.get(VENDORED_GOLD_LABELS_FILENAME)
+        actual = sha256_file(VENDORED_GOLD_LABELS_SOURCE)
+        if expected is not None and actual != expected:
+            raise ValueError(
+                f"Checksum mismatch for vendored gold-label snapshot {VENDORED_GOLD_LABELS_FILENAME}: "
+                f"expected {expected}, got {actual}."
+            ) from exc
+        destination = download_dir / VENDORED_GOLD_LABELS_FILENAME
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(VENDORED_GOLD_LABELS_SOURCE, destination)
+        print(
+            f"  [FALLBACK] {spec.description} unreachable ({exc.__class__.__name__}: {exc}); "
+            f"using vendored TCGA-only snapshot ({VENDORED_GOLD_LABELS_FILENAME})."
+        )
+        return destination
+
+
 def download_sources(download_dir: Path, *, force: bool = False) -> dict[str, Path]:
     """Download all public source files and return their local paths."""
     paths: dict[str, Path] = {}
     for spec in DOWNLOAD_SPECS:
-        paths[spec.key] = download_file(spec, download_dir / spec.filename, force=force)
+        if spec.key == "gold_labels":
+            paths[spec.key] = resolve_gold_labels(download_dir, force=force)
+        else:
+            paths[spec.key] = download_file(spec, download_dir / spec.filename, force=force)
     return paths
 
 
@@ -292,6 +340,7 @@ def build_public_crc_cms_example(output_dir: Path, *, force_download: bool = Fal
         "xena_value_encoding": "log2(count + 1)",
         "reverse_transform": "round(2^x - 1)",
         "gold_label_source": GOLD_LABELS_URL,
+        "gold_label_source_used": paths["gold_labels"].name,
         "gold_label_column": GOLD_LABELS_COLUMN,
         "n_samples": n_samples,
         "n_genes": int(gold_counts.shape[0]),
