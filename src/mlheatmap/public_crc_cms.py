@@ -25,16 +25,18 @@ GOLD_LABELS_URL = (
 GOLD_LABELS_COLUMN = "CMS_final_network_plus_RFclassifier_in_nonconsensus_samples"
 SUMMARY_PREFIXES = ("N_unmapped", "N_multimapping", "N_noFeature", "N_ambiguous", "__")
 
-# GOLD_LABELS_URL (Sage-Bionetworks/crc-cms-kras) was reachable when this
-# manuscript was first submitted (confirmed live as of 2026-04-08 via the
-# Wayback Machine) but returns HTTP 404 as of this revision (2026-07) - the
-# upstream mirror appears to have been taken down or renamed. To keep
-# `mlheatmap-download-crc-cms` reproducible without depending on that mirror's
-# uptime, we fall back to a small vendored snapshot covering exactly the 511
-# TCGA CMS labels this workflow needs. It was reconstructed from this
-# manuscript's own published Table S1 sample-to-group assignment (itself
-# originally sourced from the live CRCSC file), so it reproduces the identical
-# pinned 511-sample, 4-class cohort.
+# GOLD_LABELS_URL points at the Sage-Bionetworks/crc-cms-kras GitHub mirror,
+# which was reachable when this manuscript was first submitted but returns HTTP
+# 404 as of this revision (2026-07) - that specific repository has been removed.
+# The underlying CRCSC labels are not gone from the internet: the canonical
+# `cms_labels_public_all.txt` remains on Synapse (syn4978511, registration-
+# gated), and identical anonymous copies exist in third-party forks/repos (e.g.
+# mdylan2/crc-cms-kras, biobakery/crc-subtyping-paper). Rather than hard-code a
+# dependency on any single (removable) mirror, we fall back to a small vendored
+# snapshot covering exactly the 511 TCGA CMS labels this workflow needs,
+# reconstructed from this manuscript's own published Table S1 sample-to-group
+# assignment (itself originally sourced from the CRCSC file), so it reproduces
+# the identical pinned 511-sample, 4-class cohort with a checksum and no login.
 VENDORED_GOLD_LABELS_FILENAME = "crcsc_tcga_cms_labels_vendored.tsv"
 VENDORED_GOLD_LABELS_SOURCE = Path(__file__).resolve().parent / "data" / VENDORED_GOLD_LABELS_FILENAME
 
