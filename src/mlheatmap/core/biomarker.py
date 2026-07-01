@@ -913,6 +913,7 @@ def run_biomarker_analysis(
     fold_shap_counts = np.zeros(n_all_genes, dtype=np.float64)
     fold_accuracies: list[float] = []
     sample_shap_abs = np.zeros((len(y), n_all_genes), dtype=np.float64)
+    oof_pred_encoded = np.full(len(y), -1, dtype=int)
 
     n_classes = len(le.classes_)
     y_bin_all = label_binarize(y, classes=range(n_classes))
@@ -959,7 +960,9 @@ def run_biomarker_analysis(
 
         this_fi = _feature_importance_vector(clf)
         fold_importances[fold_var_idx] += this_fi
-        fold_accuracies.append(float(np.mean(clf.predict(X_test) == y_test)))
+        test_pred = clf.predict(X_test)
+        oof_pred_encoded[test_idx] = test_pred
+        fold_accuracies.append(float(np.mean(test_pred == y_test)))
 
         # Ranking used to choose the fold-local ROC top-N set and panel candidate
         # pool. Default is native model importance; "shap" uses mean |SHAP| on the
@@ -1165,6 +1168,8 @@ def run_biomarker_analysis(
         for idx in top_idx
     ]
 
+    oof_predicted_labels = le.inverse_transform(oof_pred_encoded).tolist()
+
     return {
         "top_genes": top_genes,
         "shap_plot_data": shap_plot_data,
@@ -1173,6 +1178,8 @@ def run_biomarker_analysis(
         "accuracy": accuracy,
         "group_names": group_names,
         "sample_labels": labels,
+        "sample_indices": sample_indices,
+        "oof_predicted_labels": oof_predicted_labels,
         "n_samples": len(y),
         "optimal_combo": optimal_combo,
         "model": model_display,
